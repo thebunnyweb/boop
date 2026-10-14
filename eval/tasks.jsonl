@@ -1,0 +1,34 @@
+{"id": "find-pdfs", "request": "list all pdf files here and in subfolders", "check": "lines", "expect": ["docs/big.pdf", "docs/small.pdf"]}
+{"id": "big-pdfs", "request": "find pdfs bigger than 10mb", "check": "lines", "expect": ["docs/big.pdf"]}
+{"id": "count-lines", "request": "count the lines in notes.txt", "check": "number", "expect": 3}
+{"id": "count-matches", "request": "how many lines in notes.txt contain hello", "check": "number", "expect": 2}
+{"id": "unique-lines", "request": "show the unique lines of notes.txt", "check": "lines", "expect": ["hello", "world"]}
+{"id": "todo-grep", "request": "find all TODO comments in the src folder", "check": "contains", "expect": ["app.py", "TODO fix"]}
+{"id": "count-errors", "request": "count the ERROR lines in logs/app.log", "check": "number", "expect": 2}
+{"id": "tail-log", "request": "show the last 2 lines of logs/app.log", "check": "lines", "expect": ["2026-10-01 10:02:00 INFO retry ok", "2026-10-01 10:03:00 ERROR db down again"], "ordered": true}
+{"id": "csv-column", "request": "print the second column of data.csv", "check": "lines", "expect": ["age", "31", "25"], "ordered": true}
+{"id": "csv-grep", "request": "show the lines in data.csv that mention bob", "check": "lines", "expect": ["bob,25"]}
+{"id": "count-src-files", "request": "how many files are in the src folder", "check": "number", "expect": 3}
+{"id": "count-words", "request": "count the words in notes.txt", "check": "number", "expect": 3}
+{"id": "only-dirs", "request": "list only the folders in this directory", "check": "lines", "expect": ["build", "docs", "images", "logs", "src", "texts"]}
+{"id": "largest-files", "request": "show the 3 largest files in this folder and its subfolders", "check": "contains", "expect": ["big.pdf"]}
+{"id": "size-human", "request": "show the size of docs/big.pdf in a human readable way", "check": "contains", "expect": ["11"]}
+{"id": "spaces", "request": "find files that have a space in their name", "check": "contains", "expect": ["my file.txt"]}
+{"id": "show-file", "request": "show what's inside todo.md", "check": "contains", "expect": ["TODO: write the docs"]}
+{"id": "path-var", "request": "print my PATH variable", "check": "contains", "expect": ["/bin"]}
+{"id": "disk-usage", "request": "show how much space each folder here uses", "check": "contains", "expect": ["docs", "src"]}
+{"id": "mkdir", "request": "make a folder called backup", "check": "verify", "verify": "test -d backup"}
+{"id": "touch", "request": "create an empty file called todo.txt", "check": "verify", "verify": "test -f todo.txt && test ! -s todo.txt"}
+{"id": "copy-py", "request": "copy all the .py files from src into a new folder called backup", "check": "verify", "verify": "test -f backup/app.py && test -f backup/util.py && test -f src/app.py"}
+{"id": "append-line", "request": "add a line saying done to the end of notes.txt", "check": "verify", "verify": "test \"$(tail -n 1 notes.txt)\" = done && test \"$(wc -l < notes.txt | tr -d ' ')\" = 4"}
+{"id": "sed-replace", "request": "replace every hello with hi in notes.txt", "check": "verify", "verify": "test \"$(cat notes.txt)\" = \"$(printf 'hi\\nworld\\nhi')\""}
+{"id": "rename-ext", "request": "rename every .txt file in the texts folder to .md", "check": "verify", "verify": "test -f texts/a.md && test -f texts/b.md && test ! -e texts/a.txt"}
+{"id": "merge-txt", "request": "combine all the txt files in texts into one file called all.txt", "check": "verify", "verify": "grep -q alpha all.txt && grep -q beta all.txt"}
+{"id": "tar-docs", "request": "compress the docs folder into docs.tar.gz", "check": "verify", "verify": "tar -tzf docs.tar.gz | grep -q small.pdf"}
+{"id": "zip-src", "request": "zip the src folder into src.zip", "check": "verify", "verify": "unzip -l src.zip | grep -q app.py"}
+{"id": "delete-logs", "request": "delete all the .log files in the logs folder", "check": "verify", "verify": "test ! -e logs/app.log && test ! -e logs/old.log && test -d logs", "danger": true}
+{"id": "delete-build", "request": "remove the build folder and everything in it", "check": "verify", "verify": "test ! -e build", "danger": true}
+{"id": "git-branch", "request": "which git branch am I on", "check": "contains", "expect": ["main"], "git": true}
+{"id": "git-last-msgs", "request": "show the last 2 commit messages", "check": "contains", "expect": ["add notes", "add src"], "git": true}
+{"id": "git-changed", "request": "which files changed in the last commit", "check": "contains", "expect": ["notes.txt"], "git": true}
+{"id": "git-undo", "request": "undo the last commit but keep the changes", "check": "verify", "verify": "test \"$(git log --format=%s -1)\" = 'add src' && git diff --cached --name-only | grep -q notes.txt", "git": true}

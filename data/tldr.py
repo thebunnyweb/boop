@@ -49,6 +49,19 @@ FILE_NAMES = {
 }
 DIR_NAMES = ["src", "photos", "logs", "docs", "backup", "projects", "build", "downloads", "music", "notes"]
 
+# path/to/<leaf> placeholders that aren't plain files
+DIR_LIKE = {"mount_point", "project", "repository", "repo", "new_root", "root", "destination", "target",
+            "workspace", "venv", "build"}
+NAMED = {
+    "key": ["id_ed25519", "server.key"], "key_file": ["id_ed25519"], "private_key": ["id_ed25519"],
+    "public_key": ["id_ed25519.pub"], "certificate": ["cert.pem"], "cert": ["cert.pem"],
+    "image": ["photo.jpg", "logo.png"], "image_file": ["photo.jpg"], "video": ["clip.mp4"], "audio": ["song.mp3"],
+    "binary": ["./app"], "executable": ["./app"], "output_executable": ["app"], "program": ["./app"],
+    "archive": ["backup.tar.gz", "archive.zip"], "config": ["config.json"], "config_file": ["config.yml"],
+    "script": ["deploy.sh"], "partition": ["/dev/sdb1"], "device": ["/dev/sdb"], "socket": ["/tmp/app.sock"],
+    "dockerfile": ["Dockerfile"], "makefile": ["Makefile"], "requirements": ["requirements.txt"],
+}
+
 # snake_case placeholder names → plausible values
 VALUES = {
     "search_pattern": ["TODO", "error", "localhost"], "pattern": ["TODO", "error"], "regex": ["^ERROR"],
@@ -104,19 +117,46 @@ class Filler:
             ext = self.rng.choice([".txt", ".log", ".json", ".md", ".csv"])
         return self.rng.choice(FILE_NAMES.get(ext) or FILE_NAMES[""]) + ext
 
+    def _path(self, ph: str) -> str:
+        parts = re.split(r"[/\\]", ph)
+        leaf = parts[-1].lower()
+        stem = re.sub(r"\d+$", "", leaf.split(".")[0])
+        if ph.startswith("~/") and len(parts) > 2:              # keep a real location: ~/.ssh/filename
+            prefix = "/".join(parts[:-1]) + "/"
+            return prefix + ("id_ed25519" if ".ssh" in prefix else self._file(leaf))
+        if "dir" in stem or "folder" in stem or stem in DIR_LIKE:
+            return self.rng.choice(DIR_NAMES)
+        if stem == "file_or_directory":
+            return self.rng.choice(DIR_NAMES) if self.rng.random() < 0.4 else self._file("x")
+        if stem in NAMED:
+            return self.rng.choice(NAMED[stem])
+        return self._file(leaf)
+
+    def _list(self, ph: str) -> str | None:
+        """`{{path/to/file1 path/to/file2 ...}}` → two concrete names; lists of unknown things are skipped."""
+        first = ph.replace("...", " ").split()[0] if ph.replace("...", " ").split() else ""
+        if first.startswith(("path/to/", "path\\to\\", "~/")):
+            a, b = self._path(first), self._path(first)
+            if b == a:                                  # some extensions have one stock name: number them
+                stem, dot, ext = a.partition(".")
+                a, b = f"{stem}1{dot}{ext}", f"{stem}2{dot}{ext}"
+            return f"{a} {b}"
+        base = re.sub(r"\d+$", "", first.lower())
+        if base in ("file", "files"):
+            return " ".join(self._file("x" + self.rng.choice([".txt", ".log"])) for _ in range(2))
+        if base in VALUES:
+            return self.rng.choice(VALUES[base])
+        return None
+
     def one(self, ph: str) -> str | None:
         ph = ph.strip()
         if ph.startswith("[") and ph.endswith("]") and "|" in ph:          # {{[-C|--directory]}}: an option spelling
             short, long = ph[1:-1].split("|", 1)
             return short if self.bsd or self.rng.random() < 0.7 else long   # BSD tools rarely take --long
-        is_path = ph.startswith(("path/to/", "path\\to\\", "~/", "/path/"))
-        if is_path:
-            items = ph.split()
-            if len(items) > 1 or "..." in ph:                                   # "file1 file2 ..." → two of them
-                kind = items[0]
-                return " ".join(self.one(kind) or "" for _ in range(2)).strip()
-            leaf = re.split(r"[/\\]", ph)[-1]
-            return self.rng.choice(DIR_NAMES) if "dir" in leaf or "folder" in leaf else self._file(leaf)
+        if "..." in ph:                                                         # "file1 file2 ...": a list
+            return self._list(ph)
+        if ph.startswith(("path/to/", "path\\to\\", "~/", "/path/")):
+            return self._path(ph)
         if "|" in ph and " " not in ph:                                         # {{f|d}}: pick one
             return self.rng.choice(ph.split("|"))
         if ph in ("*.ext", "*.extension"):
@@ -162,13 +202,48 @@ def must_mention(placeholder: str, value: str) -> bool:
     return True
 
 
+# Everyday tools only: thousands of tldr pages are niche tools, and a small model trained on them learns to
+# invent flags for things nobody has installed. First word of the page name must be in this set.
+EVERYDAY = set("""
+find grep sed awk tar zip unzip gzip gunzip zcat du df ls cp mv rm mkdir rmdir touch cat less head tail sort uniq
+wc cut tr xargs ln chmod chown ps kill killall pkill pgrep top htop lsof curl wget ssh scp rsync ping traceroute dig
+nslookup netstat ss ip ifconfig whoami whereis file stat diff cmp date cal echo printf env history alias tee watch
+crontab jq sudo man open pbcopy pbpaste defaults launchctl networksetup mdfind caffeinate screencapture softwareupdate
+diskutil brew say pmset scutil apt apt-get dpkg systemctl journalctl service useradd usermod passwd free uptime
+hostname uname lsblk mount umount xdg-open git docker kubectl npm npx yarn pip pip3 python python3 node make ffmpeg
+tree realpath basename dirname seq shuf base64 md5sum sha256sum shasum md5 openssl nc ssh-keygen gpg nl column paste
+comm split rev sleep nohup nice lscpu nproc mktemp tac locate rename gh code
+""".split())
+# Windows: cmd.exe built-ins only work in cmd; Verb-Noun cmdlets only in PowerShell; other .exe tools in both
+CMD_BUILTINS = set("dir copy del erase move ren rename rd rmdir md mkdir type cd chdir cls set echo start pushd popd "
+                   "mklink assoc ver vol title".split())
+WINDOWS_TOOLS = CMD_BUILTINS | set("xcopy robocopy findstr where tasklist taskkill ipconfig ping netstat tracert "
+                                   "nslookup shutdown winget choco scoop sfc tree systeminfo whoami hostname attrib fc "
+                                   "clip curl tar netsh icacls certutil".split())
+_CMDLET = re.compile(r"^[A-Z][a-z]+-[A-Z]\w+$")
+
+
+def everyday(tool: str, platform: str) -> bool:
+    first = tool.split()[0] if tool.split() else ""
+    if platform == "windows":
+        return bool(_CMDLET.match(first)) or first.lower() in WINDOWS_TOOLS
+    return first.lower() in EVERYDAY
+
+
+def windows_shells(tool: str) -> list[str]:
+    first = tool.split()[0] if tool.split() else ""
+    if _CMDLET.match(first):
+        return ["powershell"]
+    return ["cmd"] if first.lower() in CMD_BUILTINS else ["powershell", "cmd"]
+
+
 # GNU-only spellings that break on macOS's BSD tools: such `common` examples are kept for Linux only
 GNU_ONLY = re.compile(r"--max-depth|-daystart|--wildcards|-printf\b|\bsed -i(?! '')|\bstat -c\b|"
                       r"--human-readable|--total\b|\bdu\b.*--all|--color=always|--recursive\b|"
                       r"--fixed-strings|--binary-files|--with-filename|--line-number|--context")
 
 
-def iter_examples(root: Path, seed: int = 13, platforms=tuple(PLATFORMS)):
+def iter_examples(root: Path, seed: int = 13, platforms=tuple(PLATFORMS), all_tools: bool = False):
     """Yields dicts: {id, platform, os, shell, tool, description, command, values}. Also yields
     {'_unknown': [...]} for skipped examples so callers can report them."""
     rng = random.Random(seed)
@@ -176,8 +251,11 @@ def iter_examples(root: Path, seed: int = 13, platforms=tuple(PLATFORMS)):
     for plat in platforms:
         for page in sorted((pages / plat).glob("*.md")):
             tool, examples = parse_page(page.read_text(encoding="utf-8", errors="replace"))
+            if not all_tools and not everyday(tool, plat):
+                continue
+            targets = [("Windows", sh) for sh in windows_shells(tool)] if plat == "windows" else PLATFORMS[plat]
             for i, (desc, template) in enumerate(examples):
-                for os_name, shell in PLATFORMS[plat]:
+                for os_name, shell in targets:
                     if os_name == "macOS" and plat == "common" and GNU_ONLY.search(template):
                         continue
                     f = Filler(rng, windows=os_name == "Windows", bsd=os_name == "macOS")
@@ -188,7 +266,7 @@ def iter_examples(root: Path, seed: int = 13, platforms=tuple(PLATFORMS)):
                     cmd, values = filled
                     if os_name == "macOS" and GNU_ONLY.search(cmd):
                         continue
-                    yield {"id": f"{plat}/{page.stem}#{i}/{os_name}", "platform": plat, "os": os_name,
+                    yield {"id": f"{plat}/{page.stem}#{i}/{os_name}/{shell}", "platform": plat, "os": os_name,
                            "shell": shell, "tool": tool, "description": desc, "command": cmd, "values": values}
 
 
@@ -197,6 +275,9 @@ def main() -> None:
     ap.add_argument("root", help="a tldr-pages checkout (or its pages/ folder)")
     ap.add_argument("--out", default="data/out/tldr.jsonl")
     ap.add_argument("--seed", type=int, default=13)
+    ap.add_argument("--all-tools", action="store_true", help="keep niche tools too (default: everyday tools only)")
+    ap.add_argument("--max-per-tool", type=int, default=60,
+                    help="examples per tool family per OS, so git/docker/npm don't crowd out the basics")
     ap.add_argument("--max-per-platform", default="",
                     help="e.g. common=3000,osx=1000,linux=1500,windows=800 (random sample per tldr folder)")
     a = ap.parse_args()
@@ -205,10 +286,17 @@ def main() -> None:
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     kept, per_os, unknown, by_plat = 0, Counter(), Counter(), {}
-    for ex in iter_examples(Path(a.root), a.seed):
+    per_tool = Counter()
+    for ex in iter_examples(Path(a.root), a.seed, all_tools=a.all_tools):
         if "_unknown" in ex:
             unknown.update(ex["_unknown"])
             continue
+        if ex["command"].startswith("tldr "):                  # "see also" pointers, not commands
+            continue
+        family = (ex["os"], ex["tool"].split()[0].lower())     # git, docker, npm…: one family, one budget
+        if per_tool[family] >= a.max_per_tool:
+            continue
+        per_tool[family] += 1
         by_plat.setdefault(ex["platform"], []).append(ex)
     rng = random.Random(a.seed)
     with out.open("w", encoding="utf-8") as fh:

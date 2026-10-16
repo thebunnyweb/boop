@@ -97,7 +97,8 @@ def main() -> None:
 
     seen, splits, stats = set(), {"train": [], "valid": []}, {"train": Counter(), "valid": Counter()}
     for ex in allx:
-        key = (ex["os"], ex["request"].lower(), ex["command"])
+        # same request in a different folder is a different lesson (read the listing), so the folder is in the key
+        key = (ex["os"], ex["shell"], ex["request"].lower(), ex["command"], tuple(ex["files"]))
         if key in seen:
             continue
         seen.add(key)

@@ -73,3 +73,26 @@ def test_build_format_matches_boop_prompt_without_examples():
 def test_build_refuses_eval_lookalikes():
     assert build.eval_overlap(["count the lines in diary.txt"])            # eval: "count the lines in notes.txt"
     assert not build.eval_overlap(["how many lines does diary.txt have"])
+
+
+def test_list_placeholders_never_loop_and_give_two_names():
+    f = tldr.Filler(random.Random(0))
+    for ph in ["path/to/file...", "path/to/file1.mp3 path/to/file2.mp3 ...", "path/to/directory1 path/to/directory2 ..."]:
+        v = f.one(ph)
+        assert v and len(v.split()) == 2 and v.split()[0] != v.split()[1], (ph, v)
+    assert f.one("argument1 argument2 ...") is None                       # unknown list: skip the example
+
+
+def test_paths_get_the_right_kind_of_name():
+    f = tldr.Filler(random.Random(0))
+    assert f.one("~/.ssh/filename") == "~/.ssh/id_ed25519"
+    assert f.one("path/to/key") in tldr.NAMED["key"]
+    assert f.one("path/to/mount_point") in tldr.DIR_NAMES
+
+
+def test_only_everyday_tools_and_right_windows_shell():
+    assert tldr.everyday("git commit", "common") and tldr.everyday("tar", "common")
+    assert not tldr.everyday("sindresorhus", "common")
+    assert tldr.windows_shells("Get-ChildItem") == ["powershell"]
+    assert tldr.windows_shells("dir") == ["cmd"]                           # `dir /s` breaks in PowerShell
+    assert tldr.windows_shells("robocopy") == ["powershell", "cmd"]

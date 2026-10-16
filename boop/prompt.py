@@ -28,29 +28,30 @@ Reply with JSON only: {"command": "...", "explanation": "..."}
 
 # a couple of examples per shell family keep a small model on format and dialect
 _EXAMPLES = {
+    # kept apart from eval/tasks.jsonl on purpose (tests/test_prompt.py checks), so the eval can't be copied
     "posix": [
-        ("find pdfs bigger than 10mb in downloads",
-         {"command": "find ~/Downloads -type f -name '*.pdf' -size +10M",
-          "explanation": "Lists PDF files over 10 MB under ~/Downloads."}),
-        ("undo my last git commit but keep the changes",
-         {"command": "git reset --soft HEAD~1",
-          "explanation": "Removes the last commit and keeps its changes staged."}),
+        ("which process is using port 3000",
+         {"command": "lsof -nP -iTCP:3000 -sTCP:LISTEN",
+          "explanation": "Shows the process listening on TCP port 3000."}),
+        ("show the 10 newest files in my downloads folder",
+         {"command": "ls -t ~/Downloads | head -n 10",
+          "explanation": "Lists the 10 most recently modified files in ~/Downloads."}),
     ],
     "powershell": [
-        ("find pdfs bigger than 10mb in downloads",
-         {"command": "Get-ChildItem \"$HOME\\Downloads\" -Recurse -Filter *.pdf | Where-Object Length -gt 10MB",
-          "explanation": "Lists PDF files over 10 MB under Downloads."}),
-        ("undo my last git commit but keep the changes",
-         {"command": "git reset --soft HEAD~1",
-          "explanation": "Removes the last commit and keeps its changes staged."}),
+        ("which process is using port 3000",
+         {"command": "Get-NetTCPConnection -LocalPort 3000 | Select-Object LocalPort, State, OwningProcess",
+          "explanation": "Shows the process using port 3000."}),
+        ("show the 10 newest files in my downloads folder",
+         {"command": "Get-ChildItem \"$HOME\\Downloads\" | Sort-Object LastWriteTime -Descending | Select-Object -First 10",
+          "explanation": "Lists the 10 most recently modified files in Downloads."}),
     ],
     "cmd": [
-        ("find pdfs in downloads",
-         {"command": "dir /s /b \"%USERPROFILE%\\Downloads\\*.pdf\"",
-          "explanation": "Lists PDF files under Downloads."}),
-        ("undo my last git commit but keep the changes",
-         {"command": "git reset --soft HEAD~1",
-          "explanation": "Removes the last commit and keeps its changes staged."}),
+        ("which process is using port 3000",
+         {"command": "netstat -ano | findstr :3000",
+          "explanation": "Shows connections on port 3000 with the owning process ID."}),
+        ("show the newest files in my downloads folder",
+         {"command": "dir /o-d \"%USERPROFILE%\\Downloads\"",
+          "explanation": "Lists Downloads with the newest files first."}),
     ],
 }
 

@@ -132,7 +132,8 @@ def main() -> None:
     print(f"{len(tasks)} tasks · {detect_os()} · {shell}\n")
     for t in tasks:
         with tempfile.TemporaryDirectory(prefix="boop-eval-") as d:
-            sandbox = Path(d)
+            sandbox = Path(d) / "work"                          # the folder the command runs in
+            sandbox.mkdir()
             build_fixture(sandbox, t.get("git", False))
             ctx = Context(os=detect_os(), shell=shell, cwd=str(sandbox), files=listing(sandbox))
             started = time.time()
@@ -150,7 +151,10 @@ def main() -> None:
             elif warns and escapes_sandbox(cmd, sandbox):
                 note = "risky and points outside the sandbox: not run"
             else:
-                env = {**os.environ, "HOME": str(sandbox)}
+                # a separate, empty HOME: `~/x` must not quietly land in the sandbox (it wouldn't for you)
+                home = Path(d) / "home"                            # deleted with the temp dir
+                home.mkdir(exist_ok=True)
+                env = {**os.environ, "HOME": str(home)}
                 try:
                     r = subprocess.run(argv_for(shell, cmd), cwd=sandbox, capture_output=True, text=True,
                                        timeout=TIMEOUT, env=env, stdin=subprocess.DEVNULL)

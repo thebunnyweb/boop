@@ -13,9 +13,9 @@ def test_messages_carry_context_and_examples_in_the_right_dialect():
     assert msgs[0]["role"] == "system"
     assert "Request: find big files" in msgs[-1]["content"]
     assert "Folder contains: src/, README.md" in msgs[-1]["content"]
-    assert "find ~/Downloads" in msgs[2]["content"]              # posix example
+    assert "lsof" in msgs[2]["content"]                          # posix example
     ps = build_messages("find big files", ctx("powershell"))
-    assert "Get-ChildItem" in ps[2]["content"]
+    assert "Get-NetTCPConnection" in ps[2]["content"]
     assert "Shell: PowerShell" in ps[-1]["content"]
 
 
@@ -53,3 +53,17 @@ def test_listing_skips_dotfiles_and_caps(tmp_path):
     (tmp_path / "dir").mkdir()
     out = listing(tmp_path, limit=5)
     assert out[0] == "dir/" and out[-1] == "…" and ".secret" not in out
+
+
+def test_examples_do_not_leak_into_the_eval():
+    """A few-shot example that matches an eval task lets the model copy the answer."""
+    from pathlib import Path
+    from boop.prompt import _EXAMPLES
+    tasks = [json.loads(l)["request"].lower() for l in
+             (Path(__file__).parents[1] / "eval/tasks.jsonl").read_text().splitlines() if l.strip()]
+    for examples in _EXAMPLES.values():
+        for req, ans in examples:
+            ex = set(req.lower().split())
+            for t in tasks:
+                words = set(t.split())
+                assert len(ex & words) / len(words) < 0.6, (req, t)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 
@@ -80,13 +81,25 @@ def user_message(request: str, ctx: Context) -> str:
     return f"{context_block(ctx)}\n\nRequest: {request.strip()}"
 
 
-def build_messages(request: str, ctx: Context) -> list[dict]:
+def use_examples() -> bool:
+    """Few-shot examples help a general model; a boop fine-tune learned the format and is faster without them.
+    BOOP_FEWSHOT=1/0 overrides the guess from the model name."""
+    flag = os.environ.get("BOOP_FEWSHOT")
+    if flag is not None:
+        return flag not in ("0", "false", "no")
+    model = (os.environ.get("BOOP_MODEL") or "") + (os.environ.get("BOOP_API_MODEL") or "")
+    return "boop" not in model.lower()
+
+
+def build_messages(request: str, ctx: Context, examples: bool | None = None) -> list[dict]:
+    """The prompt at inference *and* in training data (examples=False there), so they always match."""
     msgs = [{"role": "system", "content": SYSTEM}]
-    # examples share the real folder, so there's no made-up path for the model to copy
-    ex_ctx = Context(os=ctx.os, shell=ctx.shell, cwd=ctx.cwd, files=ctx.files)
-    for req, ans in _EXAMPLES[family(ctx.shell)]:
-        msgs.append({"role": "user", "content": user_message(req, ex_ctx)})
-        msgs.append({"role": "assistant", "content": json.dumps(ans)})
+    if use_examples() if examples is None else examples:
+        # examples share the real folder, so there's no made-up path for the model to copy
+        ex_ctx = Context(os=ctx.os, shell=ctx.shell, cwd=ctx.cwd, files=ctx.files)
+        for req, ans in _EXAMPLES[family(ctx.shell)]:
+            msgs.append({"role": "user", "content": user_message(req, ex_ctx)})
+            msgs.append({"role": "assistant", "content": json.dumps(ans)})
     msgs.append({"role": "user", "content": user_message(request, ctx)})
     return msgs
 

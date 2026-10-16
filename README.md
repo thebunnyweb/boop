@@ -72,6 +72,19 @@ export BOOP_API_MODEL=qwen2.5-coder:7b
 python eval/run_eval.py
 ```
 
+## Train your own small model
+
+boop ships with a general model, but it's built to run its own fine-tune: SmolLM2-360M, about 270–390 MB, which answers instantly on any CPU.
+Everything runs for free on Kaggle:
+
+1. `data/kaggle_data.ipynb` builds the data. tldr-pages examples are rephrased into casual requests by a teacher model, then combined with
+   synthetic everyday tasks that are **executed in a sandbox and kept only if they work** (`data/synth.py`).
+2. `training/kaggle_train.ipynb` fine-tunes with Unsloth, exports GGUF (Q8_0 and Q4_K_M), pushes to Hugging Face, and scores
+   each file on `eval/`.
+
+Then: `export BOOP_MODEL=bunnyweb/boop-360m-gguf BOOP_MODEL_FILE=<file>.gguf`. boop skips the few-shot examples for
+fine-tuned models automatically (`BOOP_FEWSHOT=0/1` to force it).
+
 ## Develop
 
 ```bash

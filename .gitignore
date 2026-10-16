@@ -6,3 +6,6 @@ __pycache__/
 eval/out/
 dist/
 build/
+data/out/
+data/tldr-src/
+runs/

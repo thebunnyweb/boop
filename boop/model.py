@@ -94,16 +94,19 @@ class OpenAICompatible(Backend):
 
 
 class Fake(Backend):
-    """For tests and plumbing checks: BOOP_FAKE='{"pdf": "find . -name *.pdf"}' (substring → command)."""
+    """For tests and plumbing checks: BOOP_FAKE='{"pdf": "find . -name *.pdf"}' (substring → command;
+    `{cwd}` in a command becomes the current folder)."""
 
     def __init__(self, table: dict | None = None):
         self.table = table if table is not None else json.loads(os.environ.get("BOOP_FAKE", "{}"))
 
     def generate(self, messages: list[dict]) -> str:
-        request = messages[-1]["content"].rsplit("Request:", 1)[-1].lower()
+        content = messages[-1]["content"]
+        request = content.rsplit("Request:", 1)[-1].lower()
+        cwd = next((l[len("Folder: "):] for l in content.splitlines() if l.startswith("Folder: ")), ".")
         for key, cmd in self.table.items():
-            if key.lower() in request:
-                return json.dumps({"command": cmd, "explanation": f"fake answer for '{key}'"})
+            if key.lower() in request:                     # `{cwd}` stands for the current folder
+                return json.dumps({"command": cmd.replace("{cwd}", cwd), "explanation": f"fake answer for '{key}'"})
         return json.dumps({"command": "", "explanation": "fake backend has no answer"})
 
 

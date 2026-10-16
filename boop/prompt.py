@@ -21,7 +21,8 @@ Reply with JSON only: {"command": "...", "explanation": "..."}
 - command: a single line the user can paste and run as-is in their shell. Chain steps with the shell's own operators.
 - explanation: one short sentence saying what it does.
 - Use tools that ship with the OS. Respect the OS: macOS has BSD tools (e.g. `sed -i ''`, `stat -f`), Linux has GNU tools.
-- Quote paths that may contain spaces. Never invent file names the user did not mention.
+- Work relative to the current folder: write `notes.txt`, not the folder's full path.
+- Quote paths that may contain spaces. Never invent file or folder names the user did not mention.
 - Prefer the safe, reversible option when the request is ambiguous.
 - If no command can do it, return an empty command and say why in the explanation."""
 
@@ -80,7 +81,8 @@ def user_message(request: str, ctx: Context) -> str:
 
 def build_messages(request: str, ctx: Context) -> list[dict]:
     msgs = [{"role": "system", "content": SYSTEM}]
-    ex_ctx = Context(os=ctx.os, shell=ctx.shell, cwd="~/projects" if family(ctx.shell) == "posix" else "C:\\Users\\me")
+    # examples share the real folder, so there's no made-up path for the model to copy
+    ex_ctx = Context(os=ctx.os, shell=ctx.shell, cwd=ctx.cwd, files=ctx.files)
     for req, ans in _EXAMPLES[family(ctx.shell)]:
         msgs.append({"role": "user", "content": user_message(req, ex_ctx)})
         msgs.append({"role": "assistant", "content": json.dumps(ans)})

@@ -65,10 +65,18 @@ def build_fixture(root: Path, git: bool) -> None:
         g("add", "notes.txt"); g("commit", "-q", "-m", "add notes")
 
 
-def norm_lines(text: str) -> list[str]:
+def sandbox_prefixes(sandbox: Path) -> list[str]:
+    # macOS temp dirs live under /var, which is a symlink to /private/var: accept both spellings
+    return sorted({str(sandbox), os.path.realpath(sandbox)}, key=len, reverse=True)
+
+
+def norm_lines(text: str, sandbox: Path) -> list[str]:
+    """Same answer, any spelling: `./a.pdf`, `a.pdf` and `/full/sandbox/path/a.pdf` all count as `a.pdf`."""
     out = []
     for l in text.splitlines():
         l = l.strip()
+        for pre in sandbox_prefixes(sandbox):
+            l = l.replace(pre + "/", "")
         if not l:
             continue
         l = re.sub(r"^\./", "", l).rstrip("/")
@@ -79,21 +87,27 @@ def norm_lines(text: str) -> list[str]:
 def check(task: dict, stdout: str, sandbox: Path, shell: str) -> bool:
     kind = task["check"]
     if kind == "lines":
-        got = norm_lines(stdout)
+        got = norm_lines(stdout, sandbox)
         return got == task["expect"] if task.get("ordered") else sorted(set(got)) == sorted(task["expect"])
     if kind == "number":
         m = re.search(r"-?\d+", stdout)
         return bool(m) and int(m.group(0)) == task["expect"]
     if kind == "contains":
         return all(s in stdout for s in task["expect"])
+    if kind == "first":                                   # e.g. "largest first": the top line must be right
+        lines = norm_lines(stdout, sandbox)
+        return bool(lines) and task["expect"] in lines[0]
     if kind == "verify":
         r = subprocess.run(["sh", "-c", task["verify"]], cwd=sandbox, capture_output=True, timeout=TIMEOUT)
         return r.returncode == 0
     raise ValueError(kind)
 
 
-def escapes_sandbox(cmd: str) -> bool:
-    return bool(re.search(r"~|\$HOME|\$\{HOME\}|(^|\s)/(?!dev/null)", cmd))
+def escapes_sandbox(cmd: str, sandbox: Path) -> bool:
+    """Absolute paths are fine when they point inside the sandbox; anything else outside it is not."""
+    for pre in sandbox_prefixes(sandbox):
+        cmd = cmd.replace(pre, ".")
+    return bool(re.search(r"~|\$HOME|\$\{HOME\}|(^|[\s'\"])/(?!dev/null)", cmd))
 
 
 def main() -> None:
@@ -133,7 +147,7 @@ def main() -> None:
                 note = "no command"
             elif warns and not t.get("danger"):
                 note = f"flagged risky: {warns[0]}"
-            elif warns and escapes_sandbox(cmd):
+            elif warns and escapes_sandbox(cmd, sandbox):
                 note = "risky and points outside the sandbox: not run"
             else:
                 env = {**os.environ, "HOME": str(sandbox)}

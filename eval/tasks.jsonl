@@ -11,7 +11,7 @@
 {"id": "count-src-files", "request": "how many files are in the src folder", "check": "number", "expect": 3}
 {"id": "count-words", "request": "count the words in notes.txt", "check": "number", "expect": 3}
 {"id": "only-dirs", "request": "list only the folders in this directory", "check": "lines", "expect": ["build", "docs", "images", "logs", "src", "texts"]}
-{"id": "largest-files", "request": "show the 3 largest files in this folder and its subfolders", "check": "contains", "expect": ["big.pdf"]}
+{"id": "largest-files", "request": "show the 3 largest files in this folder and its subfolders", "check": "first", "expect": "big.pdf"}
 {"id": "size-human", "request": "show the size of docs/big.pdf in a human readable way", "check": "contains", "expect": ["11"]}
 {"id": "spaces", "request": "find files that have a space in their name", "check": "contains", "expect": ["my file.txt"]}
 {"id": "show-file", "request": "show what's inside todo.md", "check": "contains", "expect": ["TODO: write the docs"]}

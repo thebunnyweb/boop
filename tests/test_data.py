@@ -96,3 +96,11 @@ def test_only_everyday_tools_and_right_windows_shell():
     assert tldr.windows_shells("Get-ChildItem") == ["powershell"]
     assert tldr.windows_shells("dir") == ["cmd"]                           # `dir /s` breaks in PowerShell
     assert tldr.windows_shells("robocopy") == ["powershell", "cmd"]
+
+
+def test_gnu_long_options_are_never_labelled_macos():
+    assert tldr.gnu_only_on_mac('alias la="ls --all"')
+    assert tldr.gnu_only_on_mac("find . -name x | sort --reverse")
+    assert not tldr.gnu_only_on_mac("ls -la | base64")
+    assert not tldr.gnu_only_on_mac("brew bundle --file Brewfile")       # brew isn't a BSD core tool
+    assert not tldr.gnu_only_on_mac("git log --oneline")

@@ -72,7 +72,7 @@ VALUES = {
     "group": ["staff", "developers"], "groupname": ["developers"], "hostname": ["example.com"], "host": ["example.com"],
     "domain": ["example.com"], "url": ["https://example.com"], "ip_address": ["192.168.1.10"], "ip": ["192.168.1.10"],
     "port": ["3000", "8080"], "port_number": ["8080"], "pid": ["1234"], "process_id": ["1234"],
-    "process_name": ["node", "python"], "name": ["node"], "program": ["node"], "command": ["ls -la"],
+    "process_name": ["node", "python"], "name": ["node"], "program": ["node"], "command": ["cat data.txt"],
     "package": ["htop", "jq"], "package_name": ["htop", "jq"], "package1 package2 ...": ["htop jq"],
     "image": ["nginx"], "image_name": ["nginx"], "container_name": ["web"], "container": ["web"],
     "service": ["nginx"], "service_name": ["nginx"], "variable": ["PATH"], "env_var": ["PATH"],
@@ -243,6 +243,22 @@ GNU_ONLY = re.compile(r"--max-depth|-daystart|--wildcards|-printf\b|\bsed -i(?! 
                       r"--fixed-strings|--binary-files|--with-filename|--line-number|--context")
 
 
+# macOS ships BSD versions of these, which mostly don't understand GNU `--long` options (`ls --all` fails)
+BSD_CORE = set("ls cp mv rm mkdir rmdir du df sort uniq head tail wc cut date stat touch chmod chown ln xargs find "
+               "sed cat tr comm split paste nl seq rev tac readlink realpath basename dirname env id mktemp".split())
+_LONG_OPT = re.compile(r"(^|\s)--[a-z]")
+
+
+def gnu_only_on_mac(cmd: str) -> bool:
+    """True if any BSD core tool in the command (incl. after a pipe or inside an alias) gets a --long option."""
+    for part in re.split(r"[|;&]+|\$\(|`", cmd):
+        words = part.replace('"', " ").replace("'", " ").replace("=", " ").split()
+        for i, w in enumerate(words):
+            if w in BSD_CORE and _LONG_OPT.search(" ".join(words[i + 1:]) + " "):
+                return True
+    return bool(GNU_ONLY.search(cmd))
+
+
 def iter_examples(root: Path, seed: int = 13, platforms=tuple(PLATFORMS), all_tools: bool = False):
     """Yields dicts: {id, platform, os, shell, tool, description, command, values}. Also yields
     {'_unknown': [...]} for skipped examples so callers can report them."""
@@ -264,7 +280,7 @@ def iter_examples(root: Path, seed: int = 13, platforms=tuple(PLATFORMS), all_to
                         yield {"_unknown": f.unknown}
                         continue
                     cmd, values = filled
-                    if os_name == "macOS" and GNU_ONLY.search(cmd):
+                    if os_name == "macOS" and gnu_only_on_mac(cmd):
                         continue
                     yield {"id": f"{plat}/{page.stem}#{i}/{os_name}/{shell}", "platform": plat, "os": os_name,
                            "shell": shell, "tool": tool, "description": desc, "command": cmd, "values": values}

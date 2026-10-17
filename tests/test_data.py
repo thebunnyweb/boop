@@ -104,3 +104,17 @@ def test_gnu_long_options_are_never_labelled_macos():
     assert not tldr.gnu_only_on_mac("ls -la | base64")
     assert not tldr.gnu_only_on_mac("brew bundle --file Brewfile")       # brew isn't a BSD core tool
     assert not tldr.gnu_only_on_mac("git log --oneline")
+
+
+def test_build_drops_eval_lookalikes_instead_of_failing(tmp_path):
+    synth_row = {"id": "s1", "source": "synth", "template": "count-lines", "os": "Linux", "shell": "bash",
+                 "cwd": "/x", "files": ["diary.txt"], "request": "how many lines does diary.txt have",
+                 "command": "wc -l < diary.txt", "explanation": "Counts.", "piped": None}
+    look = {**synth_row, "id": "s2", "request": "count the lines in diary.txt"}
+    f = tmp_path / "s.jsonl"
+    f.write_text(json.dumps(synth_row) + "\n" + json.dumps(look) + "\n")
+    out = tmp_path / "m"
+    sys.argv = ["build.py", "--synth", str(f), "--out", str(out), "--valid-frac", "0"]
+    build.main()
+    rows = [json.loads(l) for l in (out / "train.jsonl").read_text().splitlines()]
+    assert [r["messages"][1]["content"].endswith("how many lines does diary.txt have") for r in rows] == [True]

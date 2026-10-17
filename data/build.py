@@ -89,11 +89,14 @@ def main() -> None:
     synth = [e for p in a.synth for e in synth_examples(p, rng)]
     allx = tldr + synth
 
+    # requests that read like an eval task would let the model memorise the test: drop them, don't train on them
     bad = eval_overlap([e["request"] for e in allx])
     if bad:
+        drop = {q for q, _ in bad}
         for q, t in bad[:10]:
-            print(f"  too close to eval: {q!r} ~ {t!r}", file=sys.stderr)
-        raise SystemExit(f"{len(bad)} training requests look like eval tasks; reword them (data/synth.py)")
+            print(f"  dropped (too close to eval): {q!r} ~ {t!r}", file=sys.stderr)
+        allx = [e for e in allx if e["request"] not in drop]
+        print(f"dropped {len(drop)} eval look-alikes", file=sys.stderr)
 
     seen, splits, stats = set(), {"train": [], "valid": []}, {"train": Counter(), "valid": Counter()}
     for ex in allx:

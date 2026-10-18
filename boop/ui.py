@@ -56,8 +56,9 @@ class Terminal:
             self.out = open("CONOUT$", "w", encoding="utf-8", errors="replace")
             self.inp = open("CONIN$", "r", encoding="utf-8", errors="replace")
         else:
-            self.out = open("/dev/tty", "w", encoding="utf-8", errors="replace")
-            self.inp = open("/dev/tty", "r")
+            dev = _tty_path()
+            self.out = open(dev, "w", encoding="utf-8", errors="replace")
+            self.inp = open(dev, "r")
         self.g = FANCY if _can_draw(self.out) else PLAIN
 
     @staticmethod
@@ -114,9 +115,9 @@ class Terminal:
         """A line of input (prompt_toolkit: editing, history, Windows). None on Ctrl-C/Ctrl-D."""
         try:
             return _toolkit_line(self, prompt, prefill, **kw)
-        except ImportError as e:
+        except Exception as e:      # no prompt_toolkit, or it can't drive this terminal: plain input still works
             if os.environ.get("BOOP_DEBUG"):
-                self.write(f"[no prompt_toolkit: {e}]")
+                self.write(f"[boop: plain input, prompt_toolkit failed: {e!r}]")
         self.out.write(prompt)
         self.out.flush()
         try:
@@ -127,6 +128,18 @@ class Terminal:
             return None
         s = s.rstrip("\r\n")
         return s if s or not prefill else prefill
+
+
+def _tty_path() -> str:
+    """The terminal's real device (/dev/ttys003, /dev/pts/4), not the /dev/tty alias: macOS kqueue, which
+    asyncio and so prompt_toolkit use there, refuses to watch /dev/tty."""
+    for fd in (0, 2, 1):
+        try:
+            if os.isatty(fd):
+                return os.ttyname(fd)
+        except OSError:
+            continue
+    return "/dev/tty"
 
 
 def _can_draw(out) -> bool:
@@ -222,12 +235,12 @@ def _toolkit_line(term: Terminal, prompt: str, prefill: str = "", *, history: bo
         if buf.text:
             buf.reset()
         else:
-            event.app.exit(exception=EOFError)
+            event.app.exit(result=None)
 
     @keys.add("c-d")
     def _(event):
         if not buf.text:
-            event.app.exit(exception=EOFError)
+            event.app.exit(result=None)
 
     @keys.add("enter")
     def _(event):
@@ -259,9 +272,11 @@ def _toolkit_line(term: Terminal, prompt: str, prefill: str = "", *, history: bo
                                "completion-menu.meta.completion": "bg:default #808080",
                                "completion-menu.meta.completion.current": "bg:default #808080"}))
     try:
-        return app.run()
-    except (EOFError, KeyboardInterrupt):
+        return app.run()                    # None: the person left (Ctrl-D, or Ctrl-C on an empty line)
+    except KeyboardInterrupt:
         return None
+    except EOFError as e:                   # the input closed under prompt_toolkit: let plain input try
+        raise RuntimeError("prompt_toolkit got EOF") from e
 
 
 # ---- the pieces of the screen ---------------------------------------------------------------------

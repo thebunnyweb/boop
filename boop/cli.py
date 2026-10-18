@@ -56,12 +56,19 @@ def _clear(term) -> None:
 
 
 def ask(request: str, ctx: Context, term=None) -> Answer:
-    from .ui import DIM, style
-    _status(term, style("  boop: thinking…", DIM))
-    try:
-        return parse_answer(backend().generate(build_messages(request, ctx)))
-    finally:
+    from .ui import DIM, Spinner, style
+    if term is None:                        # -p and hotkeys: a quiet note on stderr
+        _status(None, style("  boop: thinking…", DIM))
+        try:
+            return parse_answer(backend().generate(build_messages(request, ctx)))
+        finally:
+            _clear(None)
+    if _backend is None:                    # loading (or the one-time download) prints its own progress
+        _status(term, style("  waking up the model…", DIM))
+        backend()
         _clear(term)
+    with Spinner(term):
+        return parse_answer(backend().generate(build_messages(request, ctx)))
 
 
 def explain(command: str, shell: str) -> int:
@@ -96,22 +103,22 @@ def read_pipe() -> tuple[tempfile.SpooledTemporaryFile, str]:
 def handle(request: str, shell: str, *, out: str | None, yes: bool, term, spool=None, sample=None) -> int:
     """One request, start to finish. Returns an exit code (see shells.py for the --out protocol)."""
     from .run import run
-    from .ui import RED, RUN, confirm, style
+    from .ui import RED, RUN, confirm, note, show_answer
 
     ctx = Context.gather(shell, piped=sample, history=load_history())
     ans = ask(request, ctx, term)
     if not ans.command:
-        msg = "  boop: " + (ans.explanation or "couldn't come up with a command for that.")
+        msg = ans.explanation or "couldn't come up with a command for that."
         if term:
-            term.write(style(msg, RED))
+            note(term, msg, RED)
         else:
-            print(msg, file=sys.stderr)
+            print(f"boop: {msg}", file=sys.stderr)
         return 1
     cmd = ans.command
     if yes and not is_dangerous(cmd, shell, os.getcwd()):
         action = RUN
         if term:
-            term.write("  " + cmd)
+            show_answer(term, cmd, ans.explanation, [])
     elif term is None:
         print(f"boop: {cmd}\nboop: no terminal to confirm on; use -y to run safe commands without asking.",
               file=sys.stderr)
@@ -134,20 +141,36 @@ def handle(request: str, shell: str, *, out: str | None, yes: bool, term, spool=
 
 
 def english_mode_step(shell: str, out: str | None, banner: bool) -> int:
-    from .ui import DIM, GREEN, Terminal, style
+    from . import ui
+    from .context import detect_os
 
-    term = Terminal()
+    term = ui.Terminal()
     try:
+        cwd = os.getcwd()
         if banner:
-            term.write(style("boop English mode — say what you want. 'exit' or Ctrl-D to leave.", DIM))
-        line = term.line(style("boop› ", GREEN))
-        if line is None or line.strip().lower() in ("exit", "quit", "q", ":q"):
-            if line is None:
-                term.write()
+            from .model import model_label
+            ui.welcome(term, version=__version__, cwd=cwd, shell=shell, os_name=detect_os(), model=model_label())
+        line = ui.ask_request(term, cwd=cwd, shell=shell)
+        if line is None or line.strip().lower() in ("exit", "quit", "q", ":q", "/exit", "/quit"):
             return QUIT
-        if not line.strip():
+        line = line.strip()
+        if not line:
             return 1
-        return handle(line.strip(), shell, out=out, yes=False, term=term)
+        if line in ("?", "/help"):
+            ui.help_screen(term)
+            return 1
+        if line == "/forget":
+            forget()
+            ui.note(term, "forgot this session's requests")
+            return 1
+        if line == "/model":
+            from .model import model_label
+            ui.note(term, model_label() + "  (change it with BOOP_MODEL or BOOP_API_BASE)")
+            return 1
+        if line.startswith("/"):
+            ui.note(term, f"no command {line.split()[0]}; try /help", ui.RED)
+            return 1
+        return handle(line, shell, out=out, yes=False, term=term)
     finally:
         term.close()
 

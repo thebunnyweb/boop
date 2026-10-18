@@ -3,17 +3,32 @@
 Say what you want in plain English. boop shows you the command. Press Enter to run it.
 
 ```console
-$ boop find pdfs over 10mb in downloads
-  find ~/Downloads -type f -name '*.pdf' -size +10M
-  [⏎] run  [e] edit  [c] copy  [x] explain  [q] quit
+$ boop
+╭──────────────────────────────────────────────────────────────╮
+│ (•ᴥ•) boop v0.1.0                                            │
+│                                                              │
+│   Say what you want in plain English.                        │
+│   /help for shortcuts · exit or Ctrl-D to leave              │
+│                                                              │
+│   cwd: ~/code/site                                           │
+│   zsh on macOS · boop-360m (local)                           │
+╰──────────────────────────────────────────────────────────────╯
 
-$ boop undo my last commit but keep the changes
-  git reset --soft HEAD~1
+› find pdfs over 10mb in downloads
+⏺ find ~/Downloads -type f -name '*.pdf' -size +10M
+  ⎿  Finds PDF files bigger than 10 MB in Downloads.
+  ⏎ run · e edit · c copy · esc cancel
 
-$ boop delete all node_modules folders here
-  find . -name node_modules -type d -prune -exec rm -rf {} +
-  ⚠ deletes the files it finds
-  type 'yes' to run, e to edit, anything else to cancel:
+› delete all node_modules folders here
+⏺ find . -name node_modules -type d -prune -exec rm -rf {} +
+  ⎿  Deletes every node_modules folder under this one.
+  ⚠  deletes the files it finds
+  type yes to run · e to edit · anything else cancels ›
+
+────────────────────────────────────────────────────────────────────────────────
+› Try "undo my last commit but keep the changes"
+────────────────────────────────────────────────────────────────────────────────
+  ↑ history · / commands · Ctrl-C clears · Ctrl-D leaves         ~/code/site · zsh
 ```
 
 - **Runs on your machine.** A small open model (Qwen2.5-Coder 1.5B) via llama.cpp: no account, no API key, nothing leaves your computer. About 1.9 GB, downloaded once.
@@ -29,7 +44,8 @@ cat server.log | boop count errors per hour   # 3. pipe data in
 show disk usage sorted   ⌥⏎                # 4. hotkey: type English at your prompt, press Alt/Option+Enter
 ```
 
-English mode remembers the last few steps, so "now zip them" works. In a pipe, boop shows the model only the first few lines; the whole input goes to the command.
+English mode remembers the last few steps, so "now zip them" works. ↑ brings back earlier requests (kept across
+sessions), → accepts the grey suggestion, and `/help`, `/forget`, `/model`, `/exit` do what they say. In a pipe, boop shows the model only the first few lines; the whole input goes to the command.
 
 Other handy flags: `boop -p …` prints just the command (for scripts, or `| sh`), `boop -y …` runs safe commands without asking, `boop -x 'tar -xzvf a.tgz'` explains a command.
 

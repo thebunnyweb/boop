@@ -12,6 +12,7 @@ requires-python = ">=3.9"
 dependencies = [
     "llama-cpp-python>=0.3.0",
     "huggingface_hub>=0.23",
+    "prompt_toolkit>=3.0.36",
 ]
 
 [project.optional-dependencies]

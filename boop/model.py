@@ -110,6 +110,19 @@ class Fake(Backend):
         return json.dumps({"command": "", "explanation": "fake backend has no answer"})
 
 
+def model_label() -> str:
+    """A short name for the welcome box, without loading anything."""
+    name = os.environ.get("BOOP_BACKEND") or ("openai" if os.environ.get("BOOP_API_BASE") else "llamacpp")
+    if name == "fake":
+        return "fake (testing)"
+    if name == "openai":
+        host = os.environ.get("BOOP_API_BASE", "").split("//")[-1].split("/")[0]
+        return f"{os.environ.get('BOOP_API_MODEL', 'qwen2.5-coder:1.5b')} via {host}"
+    model = os.environ.get("BOOP_MODEL") or DEFAULT_MODEL
+    label = os.path.basename(model) if model.endswith(".gguf") else model.split("/")[-1]
+    return label.removesuffix(".gguf").removesuffix("-GGUF").removesuffix("-gguf") + " (local)"
+
+
 def make_backend(name: str | None = None) -> Backend:
     name = (name or os.environ.get("BOOP_BACKEND") or ("openai" if os.environ.get("BOOP_API_BASE") else "llamacpp"))
     if name == "fake":

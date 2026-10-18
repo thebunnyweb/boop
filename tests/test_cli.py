@@ -1,6 +1,7 @@
 """End to end with the fake backend: the real CLI, real shells, no model."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -74,3 +75,58 @@ def test_bash_integration_runs_in_the_current_shell(tmp_path):
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip().splitlines()[-1] in ("/tmp", os.path.realpath("/tmp"))
+
+
+def _in_a_terminal(args, keys, env, cwd):
+    """Run boop on a real pseudo-terminal, type `keys` one chunk at a time, return (exit code, screen bytes)."""
+    import pty
+    import select
+    import time
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.chdir(cwd)
+        os.execvpe(sys.executable, [sys.executable, "-m", "boop.cli", *args], env)
+    seen, pending = b"", list(keys)
+
+    def pump(seconds):
+        nonlocal seen
+        end = time.time() + seconds
+        while time.time() < end:
+            if not select.select([fd], [], [], 0.05)[0]:
+                continue
+            try:
+                data = os.read(fd, 65536)
+            except OSError:
+                return
+            if b"\x1b[6n" in data:                      # prompt_toolkit asks where the cursor is
+                os.write(fd, b"\x1b[1;1R")
+            seen += data
+
+    pump(1.5)
+    while pending:
+        os.write(fd, pending.pop(0).encode())
+        pump(0.8)
+    _, status = os.waitpid(pid, 0)
+    return os.waitstatus_to_exitcode(status), seen
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="needs a POSIX pty")
+def test_english_mode_step_in_a_real_terminal(tmp_path):
+    out = tmp_path / "out"
+    env = {**os.environ, "BOOP_BACKEND": "fake", "BOOP_FAKE": json.dumps(FAKE), "BOOP_SESSION": "pty",
+           "TERM": "xterm-256color", "XDG_STATE_HOME": str(tmp_path / "state"), "PYTHONPATH": os.getcwd()}
+    rc, screen = _in_a_terminal(["--shell", "bash", "--repl", "--banner", "--out", str(out)],
+                                ["find pdf files\r", "\r"], env, tmp_path)
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", screen.decode(errors="replace"))
+    assert rc == 0 and out.read_text() == "find . -name '*.pdf'"
+    assert "boop v" in text and "⏺" in text and "fake answer for 'pdf'" in text
+    assert (tmp_path / "state" / "boop" / "history").read_text().strip().endswith("+find pdf files")
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="needs a POSIX pty")
+def test_ctrl_d_leaves_english_mode(tmp_path):
+    env = {**os.environ, "BOOP_BACKEND": "fake", "TERM": "xterm-256color", "XDG_STATE_HOME": str(tmp_path),
+           "PYTHONPATH": os.getcwd()}
+    rc, _ = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(tmp_path / "out")], ["\x04"], env, tmp_path)
+    assert rc == 10

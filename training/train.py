@@ -20,6 +20,7 @@ BASE = "HuggingFaceTB/SmolLM2-360M-Instruct"
 def main() -> None:
     ap = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__)
     ap.add_argument("--data", default="data/out/master")
+    ap.add_argument("--data-hf", default="bunnyweb/boop-data", help="HF dataset to fetch master/ from if --data is missing")
     ap.add_argument("--out", default="runs/boop")
     ap.add_argument("--base", default=BASE)
     ap.add_argument("--max-seq", type=int, default=1024)
@@ -33,6 +34,7 @@ def main() -> None:
     ap.add_argument("--gguf", default="q8_0,q4_k_m", help="comma-separated quantizations to export ('' = none)")
     ap.add_argument("--push", default=None, help="HF repo id for the GGUF files (uses HF_TOKEN)")
     a = ap.parse_args()
+    a.data = find_data(a.data, a.data_hf)
 
     from unsloth import FastLanguageModel, is_bfloat16_supported   # before transformers/trl: applies patches
     from unsloth.chat_templates import train_on_responses_only
@@ -87,6 +89,22 @@ def main() -> None:
         if a.push:
             from push_to_hub import push
             push(a.push, files, base=a.base, token=os.environ.get("HF_TOKEN"))
+
+
+def find_data(path: str, hf_repo: str) -> str:
+    """The local build if there is one, else master/ from the HF dataset. Fails before loading any model."""
+    if (Path(path) / "train.jsonl").exists():
+        return path
+    if not hf_repo:
+        raise SystemExit(f"no {path}/train.jsonl")
+    from huggingface_hub import HfApi, snapshot_download
+    token = os.environ.get("HF_TOKEN")
+    files = HfApi(token=token).list_repo_files(hf_repo, repo_type="dataset")
+    if "master/train.jsonl" not in files:
+        raise SystemExit(f"no {path}/train.jsonl, and no master/train.jsonl in {hf_repo}; it has: {files}")
+    d = Path(snapshot_download(hf_repo, repo_type="dataset", allow_patterns=["master/*"], token=token)) / "master"
+    print(f"no {path}/train.jsonl: using {hf_repo} → {d}\n{(d / 'stats.json').read_text()}")
+    return str(d)
 
 
 def pick_gguf(out: Path, quant: str) -> Path:

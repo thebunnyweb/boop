@@ -126,6 +126,8 @@ def main() -> None:
     if not shutil.which("git"):
         tasks = [t for t in tasks if not t.get("git")]
     be = make_backend()
+    if a.dump:
+        Path(a.dump).parent.mkdir(parents=True, exist_ok=True)
     dump = open(a.dump, "w") if a.dump else None
     passed = danger_ok = danger_total = 0
     t0 = time.time()

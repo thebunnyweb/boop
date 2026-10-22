@@ -3,33 +3,22 @@
 Say what you want in plain English. boop shows you the command. Press Enter to run it.
 
 ```console
-$ boop
-╭──────────────────────────────────────────────────────────────╮
-│ (•ᴥ•) boop v0.1.0                                            │
-│                                                              │
-│   Say what you want in plain English.                        │
-│   /help for shortcuts · exit or Ctrl-D to leave              │
-│                                                              │
-│   cwd: ~/code/site                                           │
-│   zsh on macOS · boop-360m (local)                           │
-╰──────────────────────────────────────────────────────────────╯
-
-› find pdfs over 10mb in downloads
-⏺ find ~/Downloads -type f -name '*.pdf' -size +10M
-  ⎿  Finds PDF files bigger than 10 MB in Downloads.
-  ⏎ run · e edit · c copy · esc cancel
-
-› delete all node_modules folders here
-⏺ find . -name node_modules -type d -prune -exec rm -rf {} +
-  ⎿  Deletes every node_modules folder under this one.
-  ⚠  deletes the files it finds
-  type yes to run · e to edit · anything else cancels ›
-
-────────────────────────────────────────────────────────────────────────────────
-› Try "undo my last commit but keep the changes"
-────────────────────────────────────────────────────────────────────────────────
-  ↑ history · / commands · Ctrl-C clears · Ctrl-D leaves         ~/code/site · zsh
+$ boop find pdfs over 10mb in downloads
+╭─ boop ─────────────────────────────────────────────── ~/code/site · zsh ─╮
+│ ❯ find pdfs over 10mb in downloads                                       │
+│ ✦ boop · 0.8s  2 past ────────────────────────────────────────────────── │
+│ ▌ find ~/Downloads -type f -name '*.pdf' -size +10M                      │
+│   find . -name '*.pdf'                              list pdfs in here    │
+│   du -sh ~/Downloads/*.pdf                          how big are my pdfs  │
+│                                                                          │
+│ ──────────────────────────────────────────────────────────────────────── │
+│ Finds PDF files bigger than 10 MB in Downloads.                          │
+╰─ ⏎ run  ⇥ edit  ^Y copy  esc quit ───────────────────────────────────────╯
 ```
+
+The panel opens under your prompt and disappears when you're done, leaving one line: `❯ the command`.
+As you type, it fuzzy-searches what you ran before (instant, no model); Enter on **✦ ask boop** asks the
+model. Risky commands (deletes, overwrites, force-push, sudo) show a red warning and need you to type `yes`.
 
 - **Runs on your machine.** A small open model (Qwen2.5-Coder 1.5B) via llama.cpp: no account, no API key, nothing leaves your computer. About 1.9 GB, downloaded once.
 - **Nothing runs without you.** Enter runs a safe command; anything that deletes, overwrites, force-pushes or needs admin needs you to type `yes`. Those checks are plain rules, not the model, so they don't get creative.
@@ -39,13 +28,14 @@ $ boop
 
 ```bash
 boop find big log files                    # 1. one request
-boop                                       # 2. English mode: keeps going until you type exit
+boop                                       # 2. English mode: a new panel after each command, esc to leave
 cat server.log | boop count errors per hour   # 3. pipe data in
 show disk usage sorted   ⌥⏎                # 4. hotkey: type English at your prompt, press Alt/Option+Enter
 ```
 
-English mode remembers the last few steps, so "now zip them" works. ↑ brings back earlier requests (kept across
-sessions), → accepts the grey suggestion, and `/help`, `/forget`, `/model`, `/exit` do what they say. In a pipe, boop shows the model only the first few lines; the whole input goes to the command.
+English mode opens a fresh panel after each command until you press esc. It remembers the last few steps,
+so "now zip them" works. Keys: ↑↓ (or Ctrl-P/N) move, ⏎ asks or runs, ⇥ edits the command first, Ctrl-Y
+copies, esc goes back or quits. `BOOP_PLAIN=1` swaps the panel for plain line-by-line prompts. In a pipe, boop shows the model only the first few lines; the whole input goes to the command.
 
 Other handy flags: `boop -p …` prints just the command (for scripts, or `| sh`), `boop -y …` runs safe commands without asking, `boop -x 'tar -xzvf a.tgz'` explains a command.
 

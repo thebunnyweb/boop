@@ -111,22 +111,68 @@ def _in_a_terminal(args, keys, env, cwd):
     return os.waitstatus_to_exitcode(status), seen
 
 
+def _pty_env(tmp_path, **extra):
+    return {**os.environ, "BOOP_BACKEND": "fake", "BOOP_FAKE": json.dumps(FAKE), "BOOP_SESSION": "pty",
+            "TERM": "xterm-256color", "XDG_STATE_HOME": str(tmp_path / "state"), "PYTHONPATH": os.getcwd(), **extra}
+
+
+def _plain_text(screen: bytes) -> str:
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", screen.decode(errors="replace"))
+
+
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="needs a POSIX pty")
-def test_english_mode_step_in_a_real_terminal(tmp_path):
+def test_panel_asks_then_runs(tmp_path):
     out = tmp_path / "out"
-    env = {**os.environ, "BOOP_BACKEND": "fake", "BOOP_FAKE": json.dumps(FAKE), "BOOP_SESSION": "pty",
-           "TERM": "xterm-256color", "XDG_STATE_HOME": str(tmp_path / "state"), "PYTHONPATH": os.getcwd()}
-    rc, screen = _in_a_terminal(["--shell", "bash", "--repl", "--banner", "--out", str(out)],
-                                ["find pdf files\r", "\r"], env, tmp_path)
-    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", screen.decode(errors="replace"))
+    rc, screen = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(out)],
+                                ["find pdf files\r", "\r"], _pty_env(tmp_path), tmp_path)
+    text = _plain_text(screen)
     assert rc == 0 and out.read_text() == "find . -name '*.pdf'"
-    assert "boop v" in text and "⏺" in text and "fake answer for 'pdf'" in text
-    assert (tmp_path / "state" / "boop" / "history").read_text().strip().endswith("+find pdf files")
+    assert "╭─ boop" in text and "fake answer for 'pdf'" in text and "❯ find . -name '*.pdf'" in text
+    runs = [json.loads(l) for l in (tmp_path / "state" / "boop" / "history.jsonl").read_text().splitlines()]
+    assert runs[-1]["request"] == "find pdf files" and runs[-1]["command"] == "find . -name '*.pdf'"
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="needs a POSIX pty")
-def test_ctrl_d_leaves_english_mode(tmp_path):
-    env = {**os.environ, "BOOP_BACKEND": "fake", "TERM": "xterm-256color", "XDG_STATE_HOME": str(tmp_path),
-           "PYTHONPATH": os.getcwd()}
-    rc, _ = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(tmp_path / "out")], ["\x04"], env, tmp_path)
+def test_panel_risky_command_needs_yes(tmp_path):
+    out = tmp_path / "out"
+    rc, screen = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(out)],
+                                ["delete logs\r", "\r", "no\r", "\x1b"], _pty_env(tmp_path), tmp_path)
+    assert "deletes files" in _plain_text(screen) and not out.exists()
+    rc, _ = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(out)],
+                           ["delete logs\r", "\r", "yes\r"], _pty_env(tmp_path), tmp_path)
+    assert rc == 0 and out.read_text() == "rm -f *.log"
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="needs a POSIX pty")
+def test_panel_reruns_from_history_without_the_model(tmp_path):
+    hist = tmp_path / "state" / "boop" / "history.jsonl"
+    hist.parent.mkdir(parents=True)
+    hist.write_text(json.dumps({"request": "compress the logs folder", "command": "tar -czf logs.tar.gz logs"}) + "\n")
+    out = tmp_path / "out"
+    env = _pty_env(tmp_path, BOOP_FAKE="{}")               # the model knows nothing: this must come from history
+    rc, _ = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(out)], ["comp", "\x1b[B", "\r"], env, tmp_path)
+    assert rc == 0 and out.read_text() == "tar -czf logs.tar.gz logs"
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="needs a POSIX pty")
+def test_plain_fallback(tmp_path):
+    out = tmp_path / "out"
+    rc, screen = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(out)], ["find pdf\r", "\r"],
+                                _pty_env(tmp_path, BOOP_PLAIN="1"), tmp_path)
+    assert rc == 0 and out.read_text() == "find . -name '*.pdf'" and "boop ❯" in _plain_text(screen)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="needs a POSIX pty")
+def test_esc_leaves_english_mode(tmp_path):
+    rc, _ = _in_a_terminal(["--shell", "bash", "--repl", "--out", str(tmp_path / "out")], ["\x1b"],
+                           _pty_env(tmp_path), tmp_path)
     assert rc == 10
+
+
+def test_fuzzy_matching():
+    from boop.picker import fuzzy
+    assert fuzzy("comp logs", "compress the logs folder") is not None
+    assert fuzzy("xyz", "compress the logs folder") is None
+    a, _ = fuzzy("comp", "compress the logs folder")
+    b, _ = fuzzy("comp", "copy the main page")  or (-99, [])
+    assert a > b

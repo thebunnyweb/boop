@@ -16,6 +16,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import threading
 
 from . import __version__
 from .context import Context, detect_shell, forget, load_history, remember
@@ -25,12 +26,19 @@ from .safety import is_dangerous, warnings
 PIPE_SAMPLE_LINES = 20
 PIPE_SAMPLE_CHARS = 2000
 QUIT = 10           # tells the shell function to leave English mode
+QUIT_WORDS = ("exit", "quit", "q", ":q")
 _STAYS_IN_SUBSHELL = re.compile(r"^\s*(cd|pushd|popd|export|unset|source|alias|set|Set-Location|\.)\b", re.I)
 
 _backend = None
+_backend_lock = threading.Lock()      # the panel preloads the model in a thread while you type
 
 
 def backend():
+    with _backend_lock:
+        return _load_backend()
+
+
+def _load_backend():
     global _backend
     if _backend is None:
         try:
@@ -63,10 +71,6 @@ def ask(request: str, ctx: Context, term=None) -> Answer:
             return parse_answer(backend().generate(build_messages(request, ctx)))
         finally:
             _clear(None)
-    if _backend is None:                    # loading (or the one-time download) prints its own progress
-        _status(term, style("  waking up the model…", DIM))
-        backend()
-        _clear(term)
     with Spinner(term):
         return parse_answer(backend().generate(build_messages(request, ctx)))
 
@@ -100,34 +104,13 @@ def read_pipe() -> tuple[tempfile.SpooledTemporaryFile, str]:
     return spool, sample
 
 
-def handle(request: str, shell: str, *, out: str | None, yes: bool, term, spool=None, sample=None) -> int:
-    """One request, start to finish. Returns an exit code (see shells.py for the --out protocol)."""
+def execute(request: str, cmd: str, shell: str, *, out: str | None, spool=None) -> int:
+    """Run a chosen command: in your shell via --out, with the piped data, or ourselves."""
+    from .picker import record_run
     from .run import run
-    from .ui import RED, RUN, confirm, note, show_answer
 
-    ctx = Context.gather(shell, piped=sample, history=load_history())
-    ans = ask(request, ctx, term)
-    if not ans.command:
-        msg = ans.explanation or "couldn't come up with a command for that."
-        if term:
-            note(term, msg, RED)
-        else:
-            print(f"boop: {msg}", file=sys.stderr)
-        return 1
-    cmd = ans.command
-    if yes and not is_dangerous(cmd, shell, os.getcwd()):
-        action = RUN
-        if term:
-            show_answer(term, cmd, ans.explanation, [])
-    elif term is None:
-        print(f"boop: {cmd}\nboop: no terminal to confirm on; use -y to run safe commands without asking.",
-              file=sys.stderr)
-        return 1
-    else:
-        action, cmd = confirm(term, cmd, ans.explanation, shell)
-    if action != RUN:
-        return 1
     remember(request, cmd)
+    record_run(request, cmd)
     if spool is not None:                       # pipe mode: feed the data to the command ourselves
         return run(cmd, shell, stdin=spool)
     if out:                                     # shell integration runs it in your shell
@@ -140,37 +123,92 @@ def handle(request: str, shell: str, *, out: str | None, yes: bool, term, spool=
     return run(cmd, shell)
 
 
-def english_mode_step(shell: str, out: str | None, banner: bool) -> int:
-    from . import ui
-    from .context import detect_os
+def interactive(term, shell: str, *, out: str | None, request: str = "", english: bool = False,
+                spool=None, sample=None) -> int:
+    """The panel: type (or arrive with) a request, pick a command, run it. Falls back to plain prompts.
+    In English mode, leaving the panel (esc, Ctrl-D) ends English mode."""
+    from . import picker, ui
+    from .model import model_label, needs_download
 
-    term = ui.Terminal()
+    if not ui.panel_ok(term):
+        return plain(term, shell, out=out, request=request, english=english, spool=spool, sample=sample)
+    if needs_download():                        # first run: let the download show its progress
+        term.write(ui.style("boop: downloading the model once…", ui.GREY))
+        backend()
+    history = load_history()
+
+    def ask_model(req: str) -> Answer:
+        return parse_answer(backend().generate(build_messages(req, Context.gather(shell, piped=sample,
+                                                                                    history=history))))
     try:
-        cwd = os.getcwd()
-        if banner:
-            from .model import model_label
-            ui.welcome(term, version=__version__, cwd=cwd, shell=shell, os_name=detect_os(), model=model_label())
-        line = ui.ask_request(term, cwd=cwd, shell=shell)
-        if line is None or line.strip().lower() in ("exit", "quit", "q", ":q", "/exit", "/quit"):
-            return QUIT
-        line = line.strip()
-        if not line:
+        res = picker.pick(term, ask=ask_model, warnings_for=lambda c: warnings(c, shell, os.getcwd()),
+                          cwd=os.getcwd(), shell=shell, model=model_label().removesuffix(" (local)"),
+                          query=request, auto_ask=bool(request), preload=backend)
+    except Exception as e:                      # a terminal prompt_toolkit can't drive: plain prompts still work
+        if os.environ.get("BOOP_DEBUG"):
+            term.write(f"[boop: panel failed: {e!r}]")
+        return plain(term, shell, out=out, request=request, english=english, spool=spool, sample=sample)
+    if res is None:
+        return QUIT if english else 1
+    if res.action == "copy":
+        ok = ui.copy_to_clipboard(res.command)
+        ui.trail(term, res.request, res.command, "copied" if ok else "couldn't find a clipboard tool")
+        return 1
+    ui.trail(term, res.request, res.command)
+    return execute(res.request, res.command, shell, out=out, spool=spool)
+
+
+def plain(term, shell: str, *, out: str | None, request: str = "", english: bool = False,
+          spool=None, sample=None) -> int:
+    """Line-by-line version of the panel, for dumb terminals and BOOP_PLAIN=1."""
+    from .ui import ACCENT, RED, RUN, confirm, note, style
+
+    if not request:
+        line = term.line(style("boop ❯ " if term.fancy else "boop> ", ACCENT))
+        if line is None or line.strip().lower() in QUIT_WORDS:
+            return QUIT if english else 1
+        request = line.strip()
+        if not request:
             return 1
-        if line in ("?", "/help"):
-            ui.help_screen(term)
+    ans = ask(request, Context.gather(shell, piped=sample, history=load_history()), term)
+    if not ans.command:
+        note(term, ans.explanation or "couldn't come up with a command for that.", RED)
+        return 1
+    action, cmd = confirm(term, ans.command, ans.explanation, shell)
+    if action != RUN:
+        return 1
+    return execute(request, cmd, shell, out=out, spool=spool)
+
+
+def run_without_asking(request: str, shell: str, *, out: str | None, term, spool=None, sample=None) -> int:
+    """-y: safe commands run straight away; risky ones still go through the panel."""
+    from .ui import RED, note, show_answer
+
+    ans = ask(request, Context.gather(shell, piped=sample, history=load_history()), term)
+    if not ans.command:
+        msg = ans.explanation or "couldn't come up with a command for that."
+        if term:
+            note(term, msg, RED)
+        else:
+            print(f"boop: {msg}", file=sys.stderr)
+        return 1
+    if is_dangerous(ans.command, shell, os.getcwd()):
+        if term is None:
+            print(f"boop: {ans.command}\nboop: no terminal to confirm on; risky commands always ask.",
+                  file=sys.stderr)
             return 1
-        if line == "/forget":
-            forget()
-            ui.note(term, "forgot this session's requests")
-            return 1
-        if line == "/model":
-            from .model import model_label
-            ui.note(term, model_label() + "  (change it with BOOP_MODEL or BOOP_API_BASE)")
-            return 1
-        if line.startswith("/"):
-            ui.note(term, f"no command {line.split()[0]}; try /help", ui.RED)
-            return 1
-        return handle(line, shell, out=out, yes=False, term=term)
+        return interactive(term, shell, out=out, request=request, spool=spool, sample=sample)
+    if term:
+        show_answer(term, ans.command, ans.explanation, [])
+    return execute(request, ans.command, shell, out=out, spool=spool)
+
+
+def english_mode_step(shell: str, out: str | None) -> int:
+    from .ui import Terminal
+
+    term = Terminal()
+    try:
+        return interactive(term, shell, out=out, english=True)
     finally:
         term.close()
 
@@ -188,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="version", version=f"boop {__version__}")
     ap.add_argument("--out", help=argparse.SUPPRESS)
     ap.add_argument("--repl", action="store_true", help=argparse.SUPPRESS)
-    ap.add_argument("--banner", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--banner", action="store_true", help=argparse.SUPPRESS)   # old shell scripts pass it
     a = ap.parse_args(argv)
 
     if a.init:
@@ -204,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.explain:
             return explain(a.explain, shell)
         if a.repl:
-            return english_mode_step(shell, a.out, a.banner)
+            return english_mode_step(shell, a.out)
 
         request = (a.request or " ".join(a.words)).strip()
         piped = stdin_is_piped()
@@ -212,9 +250,8 @@ def main(argv: list[str] | None = None) -> int:
             if piped or not sys.stdout.isatty():
                 ap.print_usage(sys.stderr)
                 return 2
-            banner = True                           # no shell integration: run English mode right here
-            while english_mode_step(shell, None, banner) != QUIT:
-                banner = False
+            while english_mode_step(shell, None) != QUIT:   # no shell integration: English mode right here
+                pass
             return 0
 
         spool = sample = None
@@ -235,7 +272,9 @@ def main(argv: list[str] | None = None) -> int:
         from .ui import Terminal
         term = Terminal() if Terminal.available() else None
         try:
-            return handle(request, shell, out=a.out, yes=a.yes, term=term, spool=spool, sample=sample)
+            if a.yes or term is None:
+                return run_without_asking(request, shell, out=a.out, term=term, spool=spool, sample=sample)
+            return interactive(term, shell, out=a.out, request=request, spool=spool, sample=sample)
         finally:
             if term:
                 term.close()

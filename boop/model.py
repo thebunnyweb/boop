@@ -110,6 +110,19 @@ class Fake(Backend):
         return json.dumps({"command": "", "explanation": "fake backend has no answer"})
 
 
+def needs_download() -> bool:
+    """True when the default llama.cpp backend would download its model first (it prints progress)."""
+    name = os.environ.get("BOOP_BACKEND") or ("openai" if os.environ.get("BOOP_API_BASE") else "llamacpp")
+    model = os.environ.get("BOOP_MODEL") or DEFAULT_MODEL
+    if name != "llamacpp" or model.endswith(".gguf"):
+        return False
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return False
+    return not isinstance(try_to_load_from_cache(model, os.environ.get("BOOP_MODEL_FILE") or DEFAULT_FILE), str)
+
+
 def model_label() -> str:
     """A short name for the welcome box, without loading anything."""
     name = os.environ.get("BOOP_BACKEND") or ("openai" if os.environ.get("BOOP_API_BASE") else "llamacpp")

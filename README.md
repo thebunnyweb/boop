@@ -79,13 +79,45 @@ Without the integration boop still works, but it runs the command itself, so a `
 `pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`.
 Alternatively, skip it and point boop at Ollama (below).
 
-## Use a different model
+## Use a different model (any provider)
 
-```bash
-export BOOP_MODEL=~/models/my-model.gguf                    # any local GGUF
-export BOOP_API_BASE=http://localhost:11434/v1              # or any OpenAI-compatible server (Ollama, LM Studio…)
-export BOOP_API_MODEL=qwen2.5-coder:7b
+boop's own small model runs locally by default. To use something else, run `boop --init-config` and edit
+`~/.config/boop/config.toml` (`%APPDATA%\boop\config.toml` on Windows):
+
+```toml
+use = "claude"
+
+[providers.claude]
+preset = "anthropic"            # pip install "boop-cli[anthropic]"
+model = "claude-opus-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[providers.home]
+preset = "ollama"
+model = "qwen2.5-coder:7b"
+
+[providers.work]
+preset = "openai"               # any OpenAI-compatible API; set base_url for a gateway, vLLM, LiteLLM…
+model = "…"
+api_key_cmd = "security find-generic-password -s boop-openai -w"    # keys from Keychain, 1Password, pass…
 ```
+
+Presets: `local`, `ollama`, `lmstudio`, `llama-server`, `openai`, `anthropic`, `gemini`, `openrouter`, `groq`,
+`mistral`, `deepseek`, `together`, `azure`. `boop --providers` lists them, `boop --use home …` switches for one
+run, `BOOP_PROVIDER=home` for a shell.
+
+**Corporate networks.** boop trusts the operating system's certificate store (so CAs your IT department
+installed just work), honours `HTTPS_PROXY` / `NO_PROXY`, and takes extras in the config:
+
+```toml
+[network]
+ca_bundle = "~/certs/corp-root.pem"    # added to the public CAs, not instead of them
+proxy = "http://proxy.corp:8080"
+no_proxy = "localhost,.corp"
+```
+
+`boop --doctor` checks the key, the proxy, the TLS handshake (and who issued the certificate) and makes one
+real request, and says what to change when something fails.
 
 ## How good is it?
 

@@ -13,13 +13,17 @@ dependencies = [
     "llama-cpp-python>=0.3.0",
     "huggingface_hub>=0.23",
     "prompt_toolkit>=3.0.36",
+    "tomli>=2; python_version < '3.11'",          # the config file (3.11+ has tomllib)
+    "truststore>=0.9; python_version >= '3.10'",  # trust the OS certificate store (corporate CAs)
+    "certifi",
 ]
 
 [project.optional-dependencies]
+anthropic = ["anthropic>=1.0"]
 dev = ["pytest>=7"]
 
 [project.scripts]
-boop = "boop.cli:main"
+boop = "boop.cli:entry"
 
 [tool.setuptools.packages.find]
 include = ["boop*"]

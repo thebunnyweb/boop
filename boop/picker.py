@@ -177,7 +177,7 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
                 else:
                     st["error"] = ans.explanation or "no command for that, try rewording it"
             except Exception as e:                      # keep the panel alive whatever the model does
-                st["error"] = f"{type(e).__name__}: {e}"
+                st["error"] = str(e) if type(e).__name__ in ("NetError", "SystemExit") else f"{type(e).__name__}: {e}"
             st["took"] = time.monotonic() - st["busy"]
             st["busy"] = None
             if buf.text.strip() == q:

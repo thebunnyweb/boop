@@ -91,6 +91,11 @@ def use_examples() -> bool:
     if flag is not None:
         return flag not in ("0", "false", "no")
     model = (os.environ.get("BOOP_MODEL") or "") + (os.environ.get("BOOP_API_MODEL") or "")
+    try:
+        from .config import active
+        model += active().model or ""
+    except Exception:
+        pass
     return "boop" not in model.lower()
 
 

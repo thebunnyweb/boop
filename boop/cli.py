@@ -21,6 +21,7 @@ import threading
 from . import __version__
 from .context import Context, detect_shell, forget, load_history, remember
 from .prompt import Answer, build_explain_messages, build_messages, parse_answer, with_alternatives
+from .net import NetError
 from .safety import is_dangerous, warnings
 
 PIPE_SAMPLE_LINES = 20
@@ -236,6 +237,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--init", metavar="SHELL", help="print the shell integration for zsh/bash/fish/powershell")
     ap.add_argument("--forget", action="store_true", help="clear what boop remembers from this session")
     ap.add_argument("--reindex", action="store_true", help="rebuild the folder index now (it updates daily)")
+    ap.add_argument("--use", metavar="PROVIDER", help="answer with this provider (from the config or a preset)")
+    ap.add_argument("--providers", action="store_true", help="list providers and which one is in use")
+    ap.add_argument("--doctor", action="store_true", help="test the provider: key, TLS, proxy, a real request")
+    ap.add_argument("--init-config", action="store_true", help="write a commented starter config file")
     ap.add_argument("--version", action="version", version=f"boop {__version__}")
     ap.add_argument("--out", help=argparse.SUPPRESS)
     ap.add_argument("--repl", action="store_true", help=argparse.SUPPRESS)
@@ -248,6 +253,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.forget:
         forget()
+        return 0
+    if a.use:
+        os.environ["BOOP_PROVIDER"] = a.use          # also reaches the background model loader and subprocesses
+    if a.providers or a.doctor:
+        from . import doctor
+        return doctor.providers(a.use) if a.providers else doctor.doctor(a.use)
+    if a.init_config:
+        from .config import write_starter
+        path, made = write_starter()
+        print(f"boop: {'wrote' if made else 'already exists:'} {path}")
         return 0
     if a.reindex:
         from .index import build, index_file
@@ -297,7 +312,18 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print(file=sys.stderr)
         return 130
+    except NetError as e:
+        print(f"boop: {e}", file=sys.stderr)
+        return 1
+
+
+def entry() -> None:
+    try:
+        sys.exit(main())
+    except BrokenPipeError:                         # `boop --providers | head`
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(0)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    entry()

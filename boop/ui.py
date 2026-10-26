@@ -173,7 +173,20 @@ def copy_to_clipboard(text: str) -> bool:
 
 
 def trail(term: Terminal, request: str, command: str, note: str = "") -> None:
-    """What stays on screen after the panel closes: one quiet line, like a shell prompt echo."""
+    """What stays on screen after the panel closes: one line, the command coloured like in the panel."""
+    try:
+        from prompt_toolkit import print_formatted_text
+        from prompt_toolkit.formatted_text import FormattedText
+        from prompt_toolkit.output import create_output
+        from prompt_toolkit.styles import Style
+
+        from .highlight import tokens
+        from .picker import THEME
+        frags = [("class:prompt", "❯ ")] + tokens(command) + ([("class:dim", f"  {note}")] if note else [])
+        print_formatted_text(FormattedText(frags), style=Style.from_dict(THEME), output=create_output(stdout=term.out))
+        return
+    except Exception:
+        pass
     arrow = "❯" if term.fancy else ">"
     term.write(style(f"{arrow} ", ACCENT) + style(command, BOLD) + (style(f"  {note}", GREY) if note else ""))
 

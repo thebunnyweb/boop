@@ -43,6 +43,20 @@ NEW_DIRS = ["archive", "saved", "copies", "keep", "old", "stash"]
 NAMES = ["mia", "leo", "zoe", "omar", "ivy", "raj", "eva", "noah"]
 LEVELS = ["ERROR", "WARN", "INFO"]
 
+# folders the folder index would know: (what you call it, where it usually lives under home).
+# Never the eval's own (anime, tax stuff, backup), so the eval measures the pattern, not memory.
+NICKS = [("movies", "Videos"), ("bills", "Documents"), ("receipts", "Documents/Finance"),
+         ("holiday pics", "Pictures"), ("wallpapers", "Pictures"), ("comics", "Media"), ("manga", "Media/Books"),
+         ("lecture notes", "Documents/Uni"), ("recipes", "Documents"), ("old photos", "Pictures/Archive"),
+         ("work stuff", "Dropbox"), ("music", "Media"), ("podcasts", "Media/Audio"), ("ebooks", "Books"),
+         ("scans", "Documents"), ("contracts", "Documents/Work"), ("screenshots", "Pictures"),
+         ("drawings", "Art"), ("tutorials", "Videos/Learning"), ("game clips", "Videos"), ("songs", "Music"),
+         ("research", "Work"), ("reports", "Work/2025"), ("designs", "Projects/Client"), ("memes", "Pictures")]
+KNAMES = ["onepiece", "bleach", "trip", "beach", "chapter", "lecture", "invoice", "report", "summer", "draft",
+          "intro", "final", "berlin", "tokyo", "wedding", "q3", "episode", "track"]
+KEXTS = ["pdf", "jpg", "mp4", "png", "mp3", "txt", "mkv", "epub"]
+HOME_STD = ["Downloads", "Desktop", "Documents"]
+
 
 @dataclass
 class World:
@@ -115,6 +129,9 @@ class World:
         s["repl"] = r.choice([w for w in WORDS if w != s["kw"]]) + "x"
         s["branch"] = r.choice(["feature/login", "fix/typo", "dev", "experiment"])
         s["msg"] = r.choice(["update docs", "fix tests", "add config"])
+        s["msg2"] = r.choice(["tidy up", "first draft", "wip", "add readme"])
+        s["port"] = r.choice([3000, 3001, 4200, 5000, 5173, 8000, 8080, 8888, 9000])
+        s["proc"] = r.choice(["node", "python", "java", "ruby", "nginx", "postgres", "redis-server"])
         if git:
             g = lambda *a: subprocess.run(["git", *a], cwd=root, check=True, capture_output=True)
             g("init", "-q", "-b", "main")
@@ -122,6 +139,54 @@ class World:
             g("add", s["src"]); g("commit", "-q", "-m", "first commit")
             g("add", s["txt"]); g("commit", "-q", "-m", f"add {s['txt']}")
             s["git_msgs"] = [f"add {s['txt']}", "first commit"]
+            with open(root / s["txt"], "a") as fh:            # an uncommitted edit, for stash/diff/restore
+                fh.write(f"{s['word']}\n")
+
+    def build_home(self, home: Path, n_known: int, os_name: str) -> None:
+        """~/Downloads, ~/Desktop, ~/Documents with a few files, plus n_known nicknamed folders somewhere
+        under home that the folder index would list as `Known folders: nick → path`."""
+        r, s = self.rng, self.slots
+        s["hdir"] = r.choice(HOME_STD)
+        s["hdir_l"] = s["hdir"].lower()
+        s["hext"] = r.choice(["pdf", "zip", "png", "dmg" if os_name == "macOS" else "deb", "csv"])
+        hfiles = [f"{r.choice(WORDS)}-{i}.{s['hext']}" for i in range(r.randint(2, 4))]
+        hfiles = sorted(set(hfiles))
+        for d in HOME_STD:
+            (home / d).mkdir(parents=True, exist_ok=True)
+        for i, f in enumerate(hfiles):
+            (home / s["hdir"] / f).write_text(f"{i}\n")
+            os.utime(home / s["hdir"] / f, (1_700_000_000 + i * 1000,) * 2)    # newest = last in the list
+        (home / s["hdir"] / f"notes-{r.choice(WORDS)}.txt").write_text("x\n")
+        os.utime(home / s["hdir"] / next(p for p in os.listdir(home / s["hdir"]) if p.startswith("notes")),
+                 (1_600_000_000,) * 2)
+        s["hfiles"], s["hnewest"] = hfiles, hfiles[-1]
+        s["known"] = []
+        for k in range(n_known):
+            suffix = "" if k == 0 else "2"
+            nick, parent = r.choice([x for x in NICKS if x[0] != s.get("knick")])
+            base = r.choice([nick.title(), nick, nick.replace(" ", "_"), nick.replace(" ", "-"), nick.title()])
+            rel = f"{parent}/{base}"
+            kdir = home / rel
+            kdir.mkdir(parents=True)
+            kname = r.choice(KNAMES)
+            kext = r.choice(KEXTS)
+            named = [f"{kname}-{i:02d}.{kext}" for i in range(1, r.randint(3, 4))]
+            others = [f"{r.choice([n for n in KNAMES if n != kname])}-{i}.{kext}" for i in range(r.randint(3, 5))]   # 6+ files: never the size of ~ itself
+            odd = f"{kname}-notes.{r.choice([e for e in KEXTS if e != kext])}"
+            for f in named + others + [odd]:
+                (kdir / f).write_text(f + "\n")
+            with open(kdir / named[0], "wb") as fh:            # one big one, for "over 1mb" requests
+                fh.write(os.urandom(1024 * 1024 + 50_000))
+            if os_name == "Windows":
+                path = "C:\\Users\\sam\\" + rel.replace("/", "\\")
+                quoted = f'"{path}"' if " " in path else path
+            else:
+                path = ("$HOME/" if " " in rel else "~/") + rel
+                quoted = f'"{path}"' if " " in rel else path
+            s.update({f"knick{suffix}": nick, f"krel{suffix}": rel, f"kq{suffix}": quoted, f"kname{suffix}": kname,
+                      f"kext{suffix}": kext, f"knamed{suffix}": named, f"kfiles{suffix}": sorted(named + others + [odd]),
+                      f"kbase{suffix}": base.replace(" ", "_")})
+            s["known"].append([nick, [path]])
 
 
 @dataclass
@@ -136,6 +201,8 @@ class T:
     explain: str = ""
     git: bool = False
     pipe: str | None = None           # slot of a file whose content is piped in
+    known: int = 0                    # nicknamed folders the index knows (1, 2); -1: home folders, no index
+    run: bool = True                  # False: can't be checked in a sandbox (ports, processes); kept unverified
 
 
 def ev(fn):
@@ -293,6 +360,104 @@ TEMPLATES = [
     T("pipe-unique", ["sort these and drop duplicates", "unique lines only, sorted"],
       "sort -u", {"check": "lines", "expect": ev(lambda s: sorted(set(s["txt_lines"])))}, pipe="txt",
       powershell="$input | Sort-Object -Unique", explain="Sorts the input and removes duplicates."),
+
+    # ---- several conditions at once (small models drop one of them) --------------------------------
+    T("find-ext-big", ["pdfs bigger than 1mb in {docs}", "find pdf files over 1 MB inside {docs}",
+                       "which pdfs in {docs} are larger than a megabyte"],
+      "find {docs} -type f -name '*.pdf' -size +1M", {"check": "lines", "expect": ev(lambda s: [f"{s['docs']}/{s['big']}"])},
+      powershell="Get-ChildItem {docs} -Recurse -Filter *.pdf | Where-Object Length -gt 1MB",
+      explain="Lists PDF files in {docs} larger than 1 MB."),
+    T("find-ext-name", ["{ext} files in {src} with {stem} in the name", "find {src} {ext} files named like {stem}"],
+      "find {src} -type f -name '*{stem}*.{ext}'", {"check": "lines", "expect": ev(lambda s: [f"{s['src']}/{s['todo_file']}"])},
+      powershell="Get-ChildItem {src} -Recurse -Filter '*{stem}*.{ext}'",
+      explain="Finds .{ext} files in {src} whose name contains {stem}."),
+
+    # ---- your home folders, by their usual names -----------------------------------------------------
+    T("home-list", ["what's in my {hdir_l}", "list my {hdir_l} folder", "show everything in {hdir_l}"],
+      "ls ~/{hdir}", {"check": "contains", "expect": ev(lambda s: s["hfiles"])}, known=-1,
+      powershell="Get-ChildItem \"$HOME\\{hdir}\"", explain="Lists the files in ~/{hdir}."),
+    T("home-ext", ["all the {hext} files in my {hdir_l}", "find {hext}s in {hdir_l}", "{hext} files sitting in my {hdir_l} folder"],
+      "find ~/{hdir} -type f -name '*.{hext}'", {"check": "names", "expect": ev(lambda s: s["hfiles"])}, known=-1,
+      powershell="Get-ChildItem \"$HOME\\{hdir}\" -Recurse -Filter *.{hext}", explain="Finds .{hext} files in ~/{hdir}."),
+    T("home-newest", ["newest file in my {hdir_l}", "what did I last save to {hdir_l}", "most recent thing in my {hdir_l} folder"],
+      "ls -t ~/{hdir} | head -n 1", {"check": "first", "expect": ev(lambda s: s["hnewest"])}, known=-1,
+      powershell="Get-ChildItem \"$HOME\\{hdir}\" | Sort-Object LastWriteTime -Descending | Select-Object -First 1",
+      explain="Shows the most recently modified file in ~/{hdir}."),
+    T("home-copy", ["copy {txt} to my {hdir_l}", "put a copy of {txt} on my {hdir_l}"],
+      "cp {txt} ~/{hdir}/", {"check": "verify", "verify": "test -f \"$HOME/{hdir}/{txt}\" && test -f {txt}"}, known=-1,
+      powershell="Copy-Item {txt} \"$HOME\\{hdir}\"", explain="Copies {txt} into ~/{hdir}."),
+
+    # ---- folders the index knows: "my {knick} folder" → the path in `Known folders` -----------------
+    T("known-find", ["get all {kext} files named {kname} from my {knick} folder", "{kname} {kext}s in the {knick} folder",
+                     "find {kext} files with {kname} in the name in my {knick} folder",
+                     "every {kname} {kext} in {knick}"],
+      "find {kq} -type f -iname '*{kname}*.{kext}'", {"check": "names", "expect": ev(lambda s: s["knamed"])}, known=1,
+      powershell="Get-ChildItem {kq} -Recurse -Filter '*{kname}*.{kext}'",
+      explain="Finds .{kext} files with {kname} in the name in your {knick} folder."),
+    T("known-count", ["how many files are in my {knick} folder", "count the files in {knick}", "number of files in the {knick} folder"],
+      "ls {kq} | wc -l", {"check": "number", "expect": ev(lambda s: len(s["kfiles"]))}, known=1,
+      powershell="(Get-ChildItem {kq} -File).Count", explain="Counts the files in your {knick} folder."),
+    T("known-list", ["what's in my {knick} folder", "show me the {knick} folder", "list {knick}"],
+      "ls {kq}", {"check": "contains", "expect": ev(lambda s: s["kfiles"])}, known=1,
+      powershell="Get-ChildItem {kq}", explain="Lists your {knick} folder."),
+    T("known-big", ["{kext} files over 1mb in my {knick} folder", "big {kext}s (more than 1 MB) in {knick}"],
+      "find {kq} -type f -name '*.{kext}' -size +1M", {"check": "names", "expect": ev(lambda s: s["knamed"][:1])},
+      known=1, powershell="Get-ChildItem {kq} -Recurse -Filter *.{kext} | Where-Object Length -gt 1MB",
+      explain="Lists .{kext} files over 1 MB in your {knick} folder."),
+    T("known-size", ["how big is my {knick} folder", "total size of the {knick} folder"],
+      "du -sh {kq}", {"check": "contains", "expect": ev(lambda s: [s["krel"].rsplit("/", 1)[-1]])}, known=1,
+      powershell="'{{0:N1}} MB' -f ((Get-ChildItem {kq} -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)",
+      explain="Shows the total size of your {knick} folder."),
+    T("known-copy-to", ["copy {txt} to my {knick} folder", "put {txt} into the {knick} folder", "save a copy of {txt} in {knick}"],
+      "cp {txt} {kq}/", {"check": "verify", "verify": "test -f \"$HOME/{krel}/{txt}\" && test -f {txt}"}, known=1,
+      powershell="Copy-Item {txt} {kq}", explain="Copies {txt} into your {knick} folder."),
+    T("known-move-here", ["move the pdfs from {docs} into my {knick} folder", "shift {docs}/*.pdf over to {knick}"],
+      "mv {docs}/*.pdf {kq}/", {"check": "verify", "verify": "test -f \"$HOME/{krel}/{big}\" && test ! -e {docs}/{big}"},
+      known=1, powershell="Move-Item {docs}\\*.pdf {kq}", explain="Moves the PDFs in {docs} into your {knick} folder."),
+    T("known-cd", ["go to my {knick} folder", "take me to {knick}", "cd into the {knick} folder"],
+      "cd {kq}", {"check": "exit0"}, known=1, powershell="Set-Location {kq}", explain="Changes to your {knick} folder."),
+    T("known-zip", ["zip my {knick} folder", "make a zip of the {knick} folder"],
+      "zip -qr {kbase}.zip {kq}", {"check": "verify", "verify": "unzip -l {kbase}.zip | grep -q {kname}"}, known=1,
+      powershell="Compress-Archive -Path {kq} -DestinationPath {kbase}.zip", explain="Zips your {knick} folder into {kbase}.zip."),
+    T("known-two", ["copy the {kext} files from my {knick} folder to {knick2}",
+                    "copy all {kext}s in {knick} over to my {knick2} folder"],
+      "cp {kq}/*.{kext} {kq2}/", {"check": "verify", "verify": "test -f \"$HOME/{krel2}/{knamed1}\""}, known=2,
+      powershell="Copy-Item {kq}\\*.{kext} {kq2}", explain="Copies the .{kext} files from {knick} to {knick2}."),
+
+    # ---- git beyond the basics ----------------------------------------------------------------------
+    T("git-undo-soft", ["take back my last commit but keep the edits", "uncommit the latest commit, leave my work staged",
+                        "revert the previous commit locally without losing anything"],
+      "git reset --soft HEAD~1", {"check": "verify",
+                                  "verify": "test \"$(git log -1 --format=%s)\" = 'first commit' && git diff --cached --name-only | grep -q {txt}"},
+      git=True, powershell="git reset --soft HEAD~1", explain="Undoes the last commit and keeps its changes staged."),
+    T("git-amend", ["change the last commit message to '{msg2}'", "reword my latest commit as '{msg2}'"],
+      "git commit --amend -m '{msg2}'", {"check": "verify", "verify": "test \"$(git log -1 --format=%s)\" = '{msg2}'"},
+      git=True, powershell="git commit --amend -m '{msg2}'", explain="Replaces the last commit's message."),
+    T("git-stash", ["stash my changes", "put my uncommitted work aside for now"],
+      "git stash", {"check": "verify", "verify": "test -z \"$(git diff --name-only)\" && git stash list | grep -q ."},
+      git=True, powershell="git stash", explain="Saves your uncommitted changes and cleans the working tree."),
+    T("git-diff-file", ["what did I change in {txt}", "show my edits to {txt} since the last commit"],
+      "git diff {txt}", {"check": "contains", "expect": ev(lambda s: ["+" + s["word"]])}, git=True,
+      powershell="git diff {txt}", explain="Shows uncommitted changes to {txt}."),
+    T("git-discard", ["throw away my changes to {txt}", "undo my edits in {txt}, go back to the committed version"],
+      "git restore {txt}", {"check": "verify", "verify": "test -z \"$(git diff --name-only)\"", "danger": True},
+      git=True, powershell="git restore {txt}", explain="Discards uncommitted changes to {txt}."),
+
+    # ---- ports and processes (can't be proven in a sandbox: written carefully, kept unverified) -------
+    T("port-who", ["what's running on port {port}", "which app has port {port} open", "who is listening on {port}"],
+      "lsof -nP -iTCP:{port} -sTCP:LISTEN", {"check": "exit0"}, run=False,
+      powershell="Get-NetTCPConnection -LocalPort {port} | Select-Object LocalPort, State, OwningProcess",
+      explain="Shows the process listening on TCP port {port}."),
+    T("port-kill", ["kill whatever is on port {port}", "free up port {port}", "stop the thing using port {port}"],
+      "lsof -ti tcp:{port} | xargs kill", {"check": "exit0", "danger": True}, run=False,
+      powershell="Stop-Process -Id (Get-NetTCPConnection -LocalPort {port}).OwningProcess",
+      explain="Stops the process listening on port {port}."),
+    T("proc-find", ["is {proc} running", "show the {proc} processes"],
+      "pgrep -fl {proc}", {"check": "exit0"}, run=False,
+      powershell="Get-Process {proc} -ErrorAction SilentlyContinue", explain="Lists running processes matching {proc}."),
+    T("proc-kill", ["kill all {proc} processes", "stop every {proc} process"],
+      "pkill {proc}", {"check": "exit0", "danger": True}, run=False,
+      powershell="Stop-Process -Name {proc}", explain="Stops every process named {proc}."),
 ]
 
 _CWD = {"Linux": "/home/sam/project", "macOS": "/Users/sam/project", "Windows": "C:\\Users\\sam\\project"}
@@ -314,9 +479,14 @@ def make_examples(t: T, n: int, os_name: str, rng: random.Random, verify: bool):
         with tempfile.TemporaryDirectory(prefix="boop-synth-") as d:
             root = Path(d) / "work"
             root.mkdir()
+            home = Path(d) / "home"
+            home.mkdir()
             w = World(random.Random(rng.random()))
             w.build(root, git=t.git)
+            w.build_home(home, max(0, t.known), os_name)
             s = dict(w.slots)
+            s["stem"] = s["todo_file"].rsplit(".", 1)[0]
+            s["knamed1"] = s["knamed"][0] if t.known == 2 else ""      # a file that known-two copies over
             s["part0"] = s["parts"][0]
             s["part0_stem"] = s["parts"][0].rsplit(".", 1)[0]
             if os_name == "Windows":                     # Windows paths in the request read naturally either way
@@ -333,15 +503,16 @@ def make_examples(t: T, n: int, os_name: str, rng: random.Random, verify: bool):
             ex = {"id": f"synth/{t.id}/{os_name}/{i}", "source": "synth", "template": t.id, "os": os_name,
                   "shell": shell, "cwd": _CWD[os_name], "files": listing(root), "request": request,
                   "command": command, "explanation": _fmt(t.explain, s), "piped": piped,
-                  "danger": bool(spec.get("danger")), "verified": False}
+                  "danger": bool(spec.get("danger")), "verified": False,
+                  "known": s["known"] if t.known > 0 else []}
             ok, note = True, ""
-            if verify and os_name != "Windows":
+            if verify and os_name != "Windows" and t.run:
                 stdin = open(root / w.slots[t.pipe], "rb") if t.pipe else subprocess.DEVNULL
                 try:
                     r = subprocess.run(["bash" if shell == "bash" else "zsh" if shutil.which("zsh") else "bash",
                                         "-c", command], cwd=root, capture_output=True, text=True, timeout=15,
-                                       stdin=stdin, env={**os.environ, "HOME": str(Path(d) / "home")})
-                    ok = check(spec, r.stdout, root, shell)
+                                       stdin=stdin, env={**os.environ, "HOME": str(home)})
+                    ok = r.returncode == 0 if spec["check"] == "exit0" else check(spec, r.stdout, root, shell, home)
                     note = "" if ok else (r.stderr.strip()[-120:] or r.stdout.strip()[-120:])
                 finally:
                     if t.pipe:

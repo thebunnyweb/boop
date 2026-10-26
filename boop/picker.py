@@ -21,12 +21,24 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .highlight import tokens
 from .ui import IS_WINDOWS, Terminal, home_path, text_width
 
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 HEIGHT = 13                 # rows, borders included
 MAX_WIDTH = 100             # columns; a wide terminal gets a panel, not a banner
 MAX_HISTORY = 500
+
+# Catppuccin Mocha-ish: soft pastels on a dark terminal. prompt_toolkit maps these down to 256 or 16 colours
+# when the terminal can't do true colour (Apple Terminal), so they stay readable everywhere.
+THEME = {
+    "border": "#585b70", "rule": "#45475a", "title": "#fab387 bold", "dim": "#7f849c", "text": "#cdd6f4",
+    "accent": "#cba6f7", "ok": "#a6e3a1", "pointer": "#cba6f7 bold", "prompt": "#cba6f7 bold",
+    "row.on": "bg:#313244", "hit": "#fab387 bold underline", "warn": "#f38ba8", "warnicon": "#f38ba8 bold",
+    "pill": "bg:#45475a #cdd6f4 bold", "keylabel": "#7f849c", "ask": "#cba6f7 bold", "quote": "#bac2de italic",
+    "sh.cmd": "#89b4fa bold", "sh.flag": "#f9e2af", "sh.string": "#a6e3a1", "sh.path": "#94e2d5",
+    "sh.op": "#f38ba8 bold", "sh.var": "#eba0ac", "sh.num": "#fab387", "sh.arg": "#cdd6f4",
+}
 
 
 # ---- what you ran before ----------------------------------------------------------------------
@@ -132,6 +144,7 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
         items = []
         if st["answer"] is not None and st["asked_for"] == q:
             items.append(st["answer"])
+            items += st.get("alts", [])
         elif q:
             items.append(Item("ask", request=q))
         scored = []
@@ -159,6 +172,7 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
                 ans = ask(q)
                 if ans.command:
                     st["answer"] = Item("answer", ans.command, q, ans.explanation)
+                    st["alts"] = [Item("answer", c, q, note) for c, note in getattr(ans, "alternatives", [])]
                     st["asked_for"] = q
                 else:
                     st["error"] = ans.explanation or "no command for that, try rewording it"
@@ -272,10 +286,11 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
                 used += cw
         return out + [("", " " * (w - used))]
 
-    def row(fn):
+    def row(fn, bg=lambda: ""):
         def render():
-            w = width() - 4
-            return [("class:border", "│ ")] + fit(fn(w), w) + [("class:border", " │")]
+            w, b = width() - 4, bg()
+            body = [(f"{s} {b}".strip(), t) for s, t in fit(fn(w), w)] if b else fit(fn(w), w)
+            return [("class:border", "│ ")] + body + [("class:border", " │")]
         return Window(FormattedTextControl(render), height=1, dont_extend_height=True)
 
     def top():
@@ -297,56 +312,61 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
                      ("^Y", "copy"), ("esc", "quit")]
         frags, used = [("class:border", "╰─ ")], 3
         for k, label in keys_:
-            piece = f"{k} {label}  "
-            if used + len(piece) > w - 3:
+            piece = f" {k}  {label}  "
+            if used + text_width(piece) > w - 3:
                 break
-            frags += [("class:key", k), ("class:dim", f" {label}  ")]
+            frags += [("class:pill", f" {k} "), ("class:keylabel", f" {label}  ")]
             used += text_width(piece)
         return frags + [("class:border", "─" * max(0, w - used - 1) + "╯")]
 
     def info(w):
         if st["mode"] == "confirm":
             ws = warnings_for(st["pending"].command)
-            return [("class:warn", "⚠ " + "; ".join(ws) + " · type yes to run it")]
+            return [("class:warnicon", "⚠ "), ("class:warn", "; ".join(ws)), ("class:dim", " · type yes to run it")]
         if st["mode"] == "edit":
-            return [("class:dim", "editing · ⏎ runs your version")]
+            return [("class:accent", "✎ "), ("class:dim", "editing · ⏎ runs your version")]
         if st["busy"]:
             ch = SPIN[int(time.monotonic() * 12) % len(SPIN)]
             secs = time.monotonic() - st["busy"]
-            return [("class:accent", f"{ch} "), ("class:dim", f"asking {model} · {secs:.1f}s ")]
+            return [("class:accent", f"{ch} "), ("class:dim", "asking "), ("class:text", model),
+                    ("class:dim", f" · {secs:.1f}s ")]
         if st["error"]:
             return [("class:warn", st["error"])]
         n_past = sum(1 for it in st["items"] if it.kind == "past")
         head = []
         if st["answer"] is not None and st["asked_for"] == buf.text.strip():
-            head = [("class:accent", "✦ "), ("class:dim", f"boop · {st['took']:.1f}s  ")]
+            head = [("class:ok", "✦ "), ("class:dim", f"boop · {st['took']:.1f}s  ")]
         elif not buf.text.strip():
             head = [("class:dim", "type what you want · ↑↓ recent  " if runs else "type what you want  ")]
         tail = f"{n_past} past " if n_past else ""
         used = sum(text_width(t) for _, t in head) + len(tail)
         return head + [("class:dim", tail), ("class:rule", "─" * max(0, w - used))]
 
+    def row_index(i):
+        return max(0, st["sel"] - (LIST - 1)) + i
+
     def list_row(i):
         def fn(w):
             items = st["items"]
-            top_i = max(0, st["sel"] - (LIST - 1))
-            j = top_i + i
+            j = row_index(i)
             if j >= len(items):
                 return []
             it, on = items[j], j == st["sel"]
             mark = [("class:pointer", "▌ ")] if on else [("", "  ")]
-            cmd_style = "class:cmd.on" if on else "class:cmd"
             if it.kind == "ask":
-                return mark + [("class:accent", "✦ "), (cmd_style, "ask boop  "), ("class:dim", f"“{it.request}”")]
-            frags = mark + [(cmd_style, it.command)]
+                return mark + [("class:ask", "✦ ask boop  "), ("class:quote", f"“{it.request}”")]
+            cmd = tokens(it.command)
+            frags = mark + ([(f"{s} bold", t) for s, t in cmd] if on else cmd)
             if it.kind == "past" and it.request:
                 room = w - 2 - text_width(it.command) - 4
                 if room > 8:
                     req = it.request if text_width(it.request) <= room else it.request[:room - 1] + "…"
                     req_frags = [("class:hit" if k in it.hits else "class:dim", ch) for k, ch in enumerate(req)]
                     frags += [("", " " * (room - text_width(req) + 4))] + req_frags
+            elif it.explanation.startswith("same, in "):
+                frags += [("class:dim", "   " + it.explanation)]
             return frags
-        return row(fn)
+        return row(fn, bg=lambda: "class:row.on" if row_index(i) == st["sel"] and st["items"] else "")
 
     def preview(line_no):
         def fn(w):
@@ -358,8 +378,9 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
                 text = "" if not it or it.kind == "ask" else (it.explanation or
                                                               (f"you ran this for “{it.request}”" if it.request else ""))
             ws = warnings_for(it.command) if it and it.kind != "ask" and st["mode"] == "search" else []
-            lines = [("class:warn", "⚠ " + w_) for w_ in ws] + [("class:dim", l) for l in _wrap(text, w)]
-            return [lines[line_no]] if line_no < len(lines) else []
+            lines = [[("class:warnicon", "⚠ "), ("class:warn", w_)] for w_ in ws] + \
+                [[("class:text", l)] for l in _wrap(text, w)]
+            return lines[line_no] if line_no < len(lines) else []
         return row(fn)
 
     def prompt_frags():
@@ -382,10 +403,7 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
         layout=Layout(panel, focused_element=buf), key_bindings=keys, full_screen=False,
         erase_when_done=True, refresh_interval=0.1, mouse_support=False,
         input=create_input(stdin=term.inp), output=create_output(stdout=term.out),
-        style=Style.from_dict({
-            "border": "#5f5f5f", "rule": "#3a3a3a", "title": "#ff875f bold", "dim": "#8a8a8a",
-            "accent": "#ff875f", "pointer": "#ff875f bold", "prompt": "#ff875f bold", "key": "#d0d0d0 bold",
-            "cmd": "", "cmd.on": "bold", "hit": "#ff875f bold", "warn": "#ff5f5f"}))
+        style=Style.from_dict(THEME))
     refresh_items()
     if auto_ask and query.strip():
         app.pre_run_callables.append(start_ask)

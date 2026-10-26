@@ -204,15 +204,18 @@ def must_mention(placeholder: str, value: str) -> bool:
 
 # Everyday tools only: thousands of tldr pages are niche tools, and a small model trained on them learns to
 # invent flags for things nobody has installed. First word of the page name must be in this set.
+# `gh copilot suggest …` taught run 1 to hand requests to another AI; boop answers them itself
+_ASKS_AN_AI = re.compile(r"\b(copilot|chatgpt|gemini|ollama|llm|aichat|sgpt)\b", re.I)
+
 EVERYDAY = set("""
 find grep sed awk tar zip unzip gzip gunzip zcat du df ls cp mv rm mkdir rmdir touch cat less head tail sort uniq
 wc cut tr xargs ln chmod chown ps kill killall pkill pgrep top htop lsof curl wget ssh scp rsync ping traceroute dig
 nslookup netstat ss ip ifconfig whoami whereis file stat diff cmp date cal echo printf env history alias tee watch
 crontab jq sudo man open pbcopy pbpaste defaults launchctl networksetup mdfind caffeinate screencapture softwareupdate
 diskutil brew say pmset scutil apt apt-get dpkg systemctl journalctl service useradd usermod passwd free uptime
-hostname uname lsblk mount umount xdg-open git docker kubectl npm npx yarn pip pip3 python python3 node make ffmpeg
+hostname uname lsblk mount umount xdg-open git docker npm npx yarn pip pip3 python python3 node make ffmpeg
 tree realpath basename dirname seq shuf base64 md5sum sha256sum shasum md5 openssl nc ssh-keygen gpg nl column paste
-comm split rev sleep nohup nice lscpu nproc mktemp tac locate rename gh code
+comm split rev sleep nohup nice lscpu nproc mktemp tac locate rename code
 """.split())
 # Windows: cmd.exe built-ins only work in cmd; Verb-Noun cmdlets only in PowerShell; other .exe tools in both
 CMD_BUILTINS = set("dir copy del erase move ren rename rd rmdir md mkdir type cd chdir cls set echo start pushd popd "
@@ -307,7 +310,7 @@ def main() -> None:
         if "_unknown" in ex:
             unknown.update(ex["_unknown"])
             continue
-        if ex["command"].startswith("tldr "):                  # "see also" pointers, not commands
+        if ex["command"].startswith("tldr ") or _ASKS_AN_AI.search(ex["command"]):   # pointers, other assistants
             continue
         family = (ex["os"], ex["tool"].split()[0].lower())     # git, docker, npm…: one family, one budget
         if per_tool[family] >= a.max_per_tool:

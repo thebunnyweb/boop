@@ -2,6 +2,8 @@
 
 Say what you want in plain English. boop shows you the command. Press Enter to run it.
 
+![boop in a terminal](docs/boop.gif)
+
 ```console
 $ boop find pdfs over 10mb in downloads
 ╭─ boop ─────────────────────────────────────────────── ~/code/site · zsh ─╮
@@ -38,6 +40,21 @@ so "now zip them" works. Keys: ↑↓ (or Ctrl-P/N) move, ⏎ asks or runs, ⇥ 
 copies, esc goes back or quits. `BOOP_PLAIN=1` swaps the panel for plain line-by-line prompts. In a pipe, boop shows the model only the first few lines; the whole input goes to the command.
 
 Other handy flags: `boop -p …` prints just the command (for scripts, or `| sh`), `boop -y …` runs safe commands without asking, `boop -x 'tar -xzvf a.tgz'` explains a command.
+
+## It knows your folders
+
+"get all pdfs named naruto from my anime folder" works even when that folder is `~/Media/Anime`. boop keeps a
+small index of your folder **names** (never file names or contents), refreshed in the background once a day,
+and tells the model only about the folders a request mentions:
+
+```text
+Known folders: anime → ~/Media/Anime
+```
+
+If one name matches several folders, the panel offers the command for each. The index covers your home folder,
+skips hidden folders, caches, `node_modules`, `Library` and the like, and lives in `~/.local/state/boop/`
+(`%LOCALAPPDATA%\boop` on Windows). `boop --reindex` rebuilds it now; `BOOP_INDEX_ROOTS` picks other roots;
+`BOOP_NO_INDEX=1` turns it off.
 
 ## Install
 

@@ -22,6 +22,9 @@ sys.path.insert(0, str(ROOT))
 from boop.context import Context  # noqa: E402
 from boop.prompt import build_messages  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "data"))
+from tldr import EVERYDAY, _ASKS_AN_AI  # noqa: E402
+
 _CWD = {"Linux": ["/home/sam/project", "/home/ana/work/site", "/srv/app"],
         "macOS": ["/Users/sam/project", "/Users/ana/Documents/work", "/Users/lee/code/api"],
         "Windows": ["C:\\Users\\sam\\project", "C:\\Users\\ana\\Documents\\work", "D:\\code\\api"]}
@@ -36,6 +39,12 @@ def tldr_examples(path: str, rng: random.Random):
     """Teacher output → examples. The folder listing includes the files the command uses, as it would."""
     for line in open(path, encoding="utf-8"):
         r = json.loads(line)
+        # teacher output from an older allowlist: keep only what today's tldr.py would keep
+        first = (r.get("tool") or "").split()[0].lower() if r.get("tool") else ""
+        if r.get("platform") != "windows" and first and first not in EVERYDAY:
+            continue
+        if _ASKS_AN_AI.search(r.get("command", "")):
+            continue
         for q in r.get("requests", []):
             files = sorted({v for val in r["values"] for v in val.split() if "." in v and "/" not in v
                             and not v.startswith(("*", "-", "http"))} | set(rng.sample(_FILLER, 4)))
@@ -51,7 +60,8 @@ def synth_examples(path: str, rng: random.Random):
 
 
 def to_chat(ex: dict) -> dict:
-    ctx = Context(os=ex["os"], shell=ex["shell"], cwd=ex["cwd"], files=ex["files"], piped=ex.get("piped"))
+    ctx = Context(os=ex["os"], shell=ex["shell"], cwd=ex["cwd"], files=ex["files"], piped=ex.get("piped"),
+                  known=[tuple(k) for k in ex.get("known") or []])
     msgs = build_messages(ex["request"], ctx, examples=False)
     msgs.append({"role": "assistant", "content": json.dumps({"command": ex["command"],
                                                              "explanation": ex["explanation"]})})
@@ -77,7 +87,8 @@ def main() -> None:
     ap.add_argument("--tldr", action="append", default=[])
     ap.add_argument("--synth", action="append", default=[])
     ap.add_argument("--out", default="data/out/master")
-    ap.add_argument("--max-tldr", type=int, default=20000, help="cap tldr examples (synth is the core skill set)")
+    ap.add_argument("--max-tldr", type=int, default=None,
+                    help="cap tldr examples; default: half the synth count (verified synth is the core skill set)")
     ap.add_argument("--valid-frac", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=13)
     a = ap.parse_args()
@@ -85,8 +96,8 @@ def main() -> None:
     rng = random.Random(a.seed)
     tldr = [e for p in a.tldr for e in tldr_examples(p, rng)]
     rng.shuffle(tldr)
-    tldr = tldr[: a.max_tldr]
     synth = [e for p in a.synth for e in synth_examples(p, rng)]
+    tldr = tldr[: len(synth) // 2 if a.max_tldr is None else a.max_tldr]
     allx = tldr + synth
 
     # requests that read like an eval task would let the model memorise the test: drop them, don't train on them

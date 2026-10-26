@@ -32,3 +32,6 @@
 {"id": "git-last-msgs", "request": "show the last 2 commit messages", "check": "contains", "expect": ["add notes", "add src"], "git": true}
 {"id": "git-changed", "request": "which files changed in the last commit", "check": "contains", "expect": ["notes.txt"], "git": true}
 {"id": "git-undo", "request": "undo the last commit but keep the changes", "check": "verify", "verify": "test \"$(git log --format=%s -1)\" = 'add src' && git diff --cached --name-only | grep -q notes.txt", "git": true}
+{"id": "known-pdfs", "request": "get all pdfs named naruto from my anime folder", "check": "names", "expect": ["naruto-01.pdf", "naruto-02.pdf"], "known": [["anime", "~/Media/Anime"]], "home": {"Media/Anime/naruto-01.pdf": "%PDF", "Media/Anime/naruto-02.pdf": "%PDF", "Media/Anime/bleach-01.pdf": "%PDF", "Media/Anime/naruto-ep1.mkv": "x"}}
+{"id": "known-count", "request": "how many files are in my tax stuff folder", "check": "number", "expect": 3, "known": [["tax stuff", "$HOME/Documents/Tax Stuff"]], "home": {"Documents/Tax Stuff/2024.pdf": "a", "Documents/Tax Stuff/2025.pdf": "b", "Documents/Tax Stuff/receipts.csv": "c"}}
+{"id": "known-copy", "request": "copy notes.txt to my backup folder", "check": "verify", "verify": "test -f \"$HOME/Backups/laptop/notes.txt\" && test -f notes.txt", "known": [["backup", "~/Backups/laptop"]], "home": {"Backups/laptop/.keep": ""}}

@@ -20,7 +20,7 @@ import threading
 
 from . import __version__
 from .context import Context, detect_shell, forget, load_history, remember
-from .prompt import Answer, build_explain_messages, build_messages, parse_answer
+from .prompt import Answer, build_explain_messages, build_messages, parse_answer, with_alternatives
 from .safety import is_dangerous, warnings
 
 PIPE_SAMPLE_LINES = 20
@@ -61,6 +61,17 @@ def _clear(term) -> None:
     from .ui import IS_WINDOWS
     seq = "\r" + " " * 40 + "\r" if IS_WINDOWS else "\r\033[K"
     _status(term, seq)
+
+
+def context_for(request: str, shell: str, *, sample=None) -> Context:
+    """Everything the model sees besides the request, including folders the request names."""
+    from . import index
+    ctx = Context.gather(shell, piped=sample, history=load_history())
+    try:
+        ctx.known = index.lookup(request, local=ctx.files)
+    except Exception:                       # a broken index must never break boop
+        ctx.known = []
+    return ctx
 
 
 def ask(request: str, ctx: Context, term=None) -> Answer:
@@ -135,11 +146,12 @@ def interactive(term, shell: str, *, out: str | None, request: str = "", english
     if needs_download():                        # first run: let the download show its progress
         term.write(ui.style("boop: downloading the model once…", ui.GREY))
         backend()
-    history = load_history()
+    from .index import refresh_in_background
+    refresh_in_background()
 
     def ask_model(req: str) -> Answer:
-        return parse_answer(backend().generate(build_messages(req, Context.gather(shell, piped=sample,
-                                                                                    history=history))))
+        ctx = context_for(req, shell, sample=sample)
+        return with_alternatives(parse_answer(backend().generate(build_messages(req, ctx))), ctx.known)
     try:
         res = picker.pick(term, ask=ask_model, warnings_for=lambda c: warnings(c, shell, os.getcwd()),
                           cwd=os.getcwd(), shell=shell, model=model_label().removesuffix(" (local)"),
@@ -170,7 +182,7 @@ def plain(term, shell: str, *, out: str | None, request: str = "", english: bool
         request = line.strip()
         if not request:
             return 1
-    ans = ask(request, Context.gather(shell, piped=sample, history=load_history()), term)
+    ans = ask(request, context_for(request, shell, sample=sample), term)
     if not ans.command:
         note(term, ans.explanation or "couldn't come up with a command for that.", RED)
         return 1
@@ -184,7 +196,7 @@ def run_without_asking(request: str, shell: str, *, out: str | None, term, spool
     """-y: safe commands run straight away; risky ones still go through the panel."""
     from .ui import RED, note, show_answer
 
-    ans = ask(request, Context.gather(shell, piped=sample, history=load_history()), term)
+    ans = ask(request, context_for(request, shell, sample=sample), term)
     if not ans.command:
         msg = ans.explanation or "couldn't come up with a command for that."
         if term:
@@ -223,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--shell", help="zsh | bash | fish | powershell | cmd (default: detected)")
     ap.add_argument("--init", metavar="SHELL", help="print the shell integration for zsh/bash/fish/powershell")
     ap.add_argument("--forget", action="store_true", help="clear what boop remembers from this session")
+    ap.add_argument("--reindex", action="store_true", help="rebuild the folder index now (it updates daily)")
     ap.add_argument("--version", action="version", version=f"boop {__version__}")
     ap.add_argument("--out", help=argparse.SUPPRESS)
     ap.add_argument("--repl", action="store_true", help=argparse.SUPPRESS)
@@ -235,6 +248,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.forget:
         forget()
+        return 0
+    if a.reindex:
+        from .index import build, index_file
+        print(f"boop: indexed {build()} folders → {index_file()}")
         return 0
     shell = detect_shell(a.shell)
 
@@ -259,8 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             spool, sample = read_pipe()
 
         if a.print:                                 # hotkeys and scripts: command on stdout, nothing else
-            ctx = Context.gather(shell, piped=sample, history=load_history())
-            ans = ask(request, ctx, term=None)
+            ans = ask(request, context_for(request, shell, sample=sample), term=None)
             if not ans.command:
                 print(f"boop: {ans.explanation or 'no command for that'}", file=sys.stderr)
                 return 1

@@ -67,3 +67,12 @@ def test_examples_do_not_leak_into_the_eval():
             for t in tasks:
                 words = set(t.split())
                 assert len(ex & words) / len(words) < 0.6, (req, t)
+
+
+def test_highlight_colours_each_part_of_a_command():
+    from boop.highlight import tokens
+    kinds = {t: k for k, t in tokens("find ~/Media -iname '*.pdf' | wc -l > n.txt") if t.strip()}
+    assert kinds["find"] == kinds["wc"] == "class:sh.cmd"
+    assert kinds["~/Media"] == "class:sh.path" and kinds["-iname"] == kinds["-l"] == "class:sh.flag"
+    assert kinds["'*.pdf'"] == "class:sh.string" and kinds["|"] == kinds[">"] == "class:sh.op"
+    assert "".join(t for _, t in tokens("git log -n 2 --format=%s")) == "git log -n 2 --format=%s"

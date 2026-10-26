@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .context import Context
 
@@ -24,6 +24,7 @@ Reply with JSON only: {"command": "...", "explanation": "..."}
 - Use tools that ship with the OS. Respect the OS: macOS has BSD tools (e.g. `sed -i ''`, `stat -f`), Linux has GNU tools.
 - Work relative to the current folder: write `notes.txt`, not the folder's full path.
 - Quote paths that may contain spaces. Never invent file or folder names the user did not mention.
+- If the request names a folder listed under "Known folders", use that exact path.
 - Prefer the safe, reversible option when the request is ambiguous.
 - If no command can do it, return an empty command and say why in the explanation."""
 
@@ -68,6 +69,8 @@ def context_block(ctx: Context) -> str:
     lines = [f"OS: {ctx.os_detail}", f"Shell: {_SHELL_NAME.get(ctx.shell, ctx.shell)}", f"Folder: {ctx.cwd}"]
     if ctx.files:
         lines.append("Folder contains: " + ", ".join(ctx.files))
+    if ctx.known:                                   # only the best match; the panel offers the others
+        lines.append("Known folders: " + "; ".join(f"{phrase} → {paths[0]}" for phrase, paths in ctx.known))
     if ctx.history:
         lines.append("Earlier in this session:")
         lines += [f"  - {h['request']}  →  {h['command']}" for h in ctx.history]
@@ -119,6 +122,15 @@ def build_explain_messages(command: str, ctx: Context) -> list[dict]:
 class Answer:
     command: str
     explanation: str
+    alternatives: list = field(default_factory=list)    # [(command, note)]: same answer, other folders
+
+
+def with_alternatives(ans: Answer, known: list) -> Answer:
+    """One name, several folders (two 'anime' folders): offer the same command for each of them."""
+    for phrase, paths in known:
+        if len(paths) > 1 and paths[0] in ans.command:
+            ans.alternatives += [(ans.command.replace(paths[0], p), f"same, in {p}") for p in paths[1:]]
+    return ans
 
 
 _FENCE = re.compile(r"```(?:\w+)?\s*\n?(.*?)```", re.S)

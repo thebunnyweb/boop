@@ -63,6 +63,7 @@ class Context:
     files: list[str] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)   # recent {"request", "command"} in this session
     piped: str | None = None                            # first lines of piped-in data, if any
+    known: list = field(default_factory=list)           # [(phrase, [paths])] from the folder index
 
     @classmethod
     def gather(cls, shell: str | None = None, piped: str | None = None, history: list[dict] | None = None):

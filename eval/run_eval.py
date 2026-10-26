@@ -84,8 +84,11 @@ def norm_lines(text: str, sandbox: Path) -> list[str]:
     return out
 
 
-def check(task: dict, stdout: str, sandbox: Path, shell: str) -> bool:
+def check(task: dict, stdout: str, sandbox: Path, shell: str, home: Path | None = None) -> bool:
     kind = task["check"]
+    if kind == "names":                                   # files elsewhere (e.g. under ~): compare basenames
+        got = {os.path.basename(l.strip().rstrip("/")) for l in stdout.splitlines() if l.strip()}
+        return sorted(got) == sorted(task["expect"])
     if kind == "lines":
         got = norm_lines(stdout, sandbox)
         return got == task["expect"] if task.get("ordered") else sorted(set(got)) == sorted(task["expect"])
@@ -98,7 +101,9 @@ def check(task: dict, stdout: str, sandbox: Path, shell: str) -> bool:
         lines = norm_lines(stdout, sandbox)
         return bool(lines) and task["expect"] in lines[0]
     if kind == "verify":
-        r = subprocess.run(["sh", "-c", task["verify"]], cwd=sandbox, capture_output=True, timeout=TIMEOUT)
+        env = {**os.environ, "HOME": str(home)} if home else None
+        r = subprocess.run(["sh", "-c", task["verify"]], cwd=sandbox, capture_output=True, timeout=TIMEOUT,
+                           env=env)
         return r.returncode == 0
     raise ValueError(kind)
 
@@ -137,7 +142,13 @@ def main() -> None:
             sandbox = Path(d) / "work"                          # the folder the command runs in
             sandbox.mkdir()
             build_fixture(sandbox, t.get("git", False))
-            ctx = Context(os=detect_os(), shell=shell, cwd=str(sandbox), files=listing(sandbox))
+            home = Path(d) / "home"                                # a separate, empty HOME (see below)
+            home.mkdir()
+            for rel, text in t.get("home", {}).items():          # folders the folder index would know about
+                (home / rel).parent.mkdir(parents=True, exist_ok=True)
+                (home / rel).write_text(text)
+            ctx = Context(os=detect_os(), shell=shell, cwd=str(sandbox), files=listing(sandbox),
+                          known=[(phrase, [path]) for phrase, path in t.get("known", [])])
             started = time.time()
             ans = parse_answer(be.generate(build_messages(t["request"], ctx)))
             secs = time.time() - started
@@ -153,15 +164,13 @@ def main() -> None:
             elif warns and escapes_sandbox(cmd, sandbox):
                 note = "risky and points outside the sandbox: not run"
             else:
-                # a separate, empty HOME: `~/x` must not quietly land in the sandbox (it wouldn't for you)
-                home = Path(d) / "home"                            # deleted with the temp dir
-                home.mkdir(exist_ok=True)
+                # a separate HOME: `~/x` must not quietly land in the sandbox (it wouldn't for you)
                 env = {**os.environ, "HOME": str(home)}
                 try:
                     r = subprocess.run(argv_for(shell, cmd), cwd=sandbox, capture_output=True, text=True,
                                        timeout=TIMEOUT, env=env, stdin=subprocess.DEVNULL)
                     out = r.stdout
-                    ok = check(t, out, sandbox, shell)
+                    ok = check(t, out, sandbox, shell, home)
                     if not ok:
                         note = (r.stderr.strip().splitlines() or [f"exit {r.returncode}"])[-1][:100]
                 except subprocess.TimeoutExpired:

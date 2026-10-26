@@ -94,8 +94,9 @@ class OpenAICompatible(Backend):
 
 
 class Fake(Backend):
-    """For tests and plumbing checks: BOOP_FAKE='{"pdf": "find . -name *.pdf"}' (substring → command;
-    `{cwd}` in a command becomes the current folder)."""
+    """For tests, demos and plumbing checks: BOOP_FAKE='{"pdf": "find . -name *.pdf"}' (substring → command,
+    or → [command, explanation]; `{cwd}` in a command becomes the current folder). BOOP_FAKE_DELAY=1.2 makes
+    it "think" for that many seconds."""
 
     def __init__(self, table: dict | None = None):
         self.table = table if table is not None else json.loads(os.environ.get("BOOP_FAKE", "{}"))
@@ -104,9 +105,12 @@ class Fake(Backend):
         content = messages[-1]["content"]
         request = content.rsplit("Request:", 1)[-1].lower()
         cwd = next((l[len("Folder: "):] for l in content.splitlines() if l.startswith("Folder: ")), ".")
-        for key, cmd in self.table.items():
+        import time
+        time.sleep(float(os.environ.get("BOOP_FAKE_DELAY") or 0))
+        for key, val in self.table.items():
             if key.lower() in request:                     # `{cwd}` stands for the current folder
-                return json.dumps({"command": cmd.replace("{cwd}", cwd), "explanation": f"fake answer for '{key}'"})
+                cmd, why = (val[0], val[1]) if isinstance(val, list) else (val, f"fake answer for '{key}'")
+                return json.dumps({"command": cmd.replace("{cwd}", cwd), "explanation": why})
         return json.dumps({"command": "", "explanation": "fake backend has no answer"})
 
 
@@ -124,7 +128,9 @@ def needs_download() -> bool:
 
 
 def model_label() -> str:
-    """A short name for the welcome box, without loading anything."""
+    """A short name for the panel, without loading anything. BOOP_MODEL_LABEL overrides it."""
+    if os.environ.get("BOOP_MODEL_LABEL"):
+        return os.environ["BOOP_MODEL_LABEL"]
     name = os.environ.get("BOOP_BACKEND") or ("openai" if os.environ.get("BOOP_API_BASE") else "llamacpp")
     if name == "fake":
         return "fake (testing)"

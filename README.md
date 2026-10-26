@@ -119,6 +119,8 @@ no_proxy = "localhost,.corp"
 `boop --doctor` checks the key, the proxy, the TLS handshake (and who issued the certificate) and makes one
 real request, and says what to change when something fails.
 
+![providers, a corporate CA and boop --doctor](docs/providers.gif)
+
 ## How good is it?
 
 `eval/run_eval.py` runs 34 everyday tasks: files, text, archives, git, and risky deletes. Each one runs the model's command in a throwaway folder and checks the result, so any correct command passes, not one exact string.

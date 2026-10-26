@@ -312,6 +312,7 @@ def test_cli_providers_and_doctor(tmp_path):
         r = subprocess.run([sys.executable, "-m", "boop.cli", "--providers"], capture_output=True, text=True, env=env)
         assert r.returncode == 0 and "● mine" in r.stdout and "anthropic" in r.stdout
         r = subprocess.run([sys.executable, "-m", "boop.cli", "--doctor"], capture_output=True, text=True, env=env)
-        assert r.returncode == 0 and "✓ answer  wc -l < notes.txt" in r.stdout, r.stdout + r.stderr
+        import re
+        assert r.returncode == 0 and re.search(r"✓ answer\s+wc -l < notes.txt", r.stdout), r.stdout + r.stderr
     finally:
         srv.shutdown()

@@ -51,27 +51,52 @@ class LlamaCpp(Backend):
     def __init__(self, model: str | None = None, filename: str | None = None, network: cfg.Network | None = None):
         from llama_cpp import Llama
 
-        apply_to_libraries(network or cfg.Network())     # the one-time download honours ca_bundle / proxy too
-        model = model or os.environ.get("BOOP_MODEL") or DEFAULT_MODEL
-        filename = filename or os.environ.get("BOOP_MODEL_FILE") or DEFAULT_FILE
+        path = model_file(model, filename, network, download=True)
         kw = dict(n_ctx=4096, n_gpu_layers=-1, verbose=False)   # -1: use the GPU (Metal/CUDA) when built with it
-        if model.endswith(".gguf"):
-            with _quiet_stderr():
-                self.llm = Llama(model_path=model, **kw)
-        else:
-            from huggingface_hub import try_to_load_from_cache
-            if not isinstance(try_to_load_from_cache(model, filename), str):
-                print(f"boop: downloading the model once ({model})…", file=sys.stderr)
-                self.llm = Llama.from_pretrained(repo_id=model, filename=filename, **kw)
-            else:
-                with _quiet_stderr():
-                    self.llm = Llama.from_pretrained(repo_id=model, filename=filename, **kw)
+        with _quiet_stderr():
+            self.llm = Llama(model_path=path, **kw)
 
     def generate(self, messages: list[dict]) -> str:
         out = self.llm.create_chat_completion(
             messages=messages, temperature=0.0, max_tokens=MAX_TOKENS,
             response_format={"type": "json_object", "schema": OUTPUT_SCHEMA})
         return out["choices"][0]["message"]["content"] or ""
+
+
+def model_file(model: str | None = None, filename: str | None = None, network: cfg.Network | None = None,
+               download: bool = False) -> str | None:
+    """The local GGUF's path. Once downloaded this never touches the network, so boop works offline
+    (llama.cpp's own Llama.from_pretrained lists the repo online on every start, cached or not).
+    Returns None when it isn't downloaded and download=False."""
+    model = model or os.environ.get("BOOP_MODEL") or DEFAULT_MODEL
+    filename = filename or os.environ.get("BOOP_MODEL_FILE") or DEFAULT_FILE
+    if model.endswith(".gguf") or os.path.isfile(os.path.expanduser(model)):
+        path = os.path.expanduser(model)
+        if not os.path.isfile(path):
+            raise NetError(f"model file {path} does not exist (BOOP_MODEL / model in the config)")
+        return path
+    from huggingface_hub import try_to_load_from_cache
+    cached = try_to_load_from_cache(model, filename)
+    if isinstance(cached, str):
+        return cached
+    if not download:
+        return None
+    from huggingface_hub import hf_hub_download
+    net = network or cfg.Network()
+    offline_hint = ("Offline? Download it once while online (boop --download), or point BOOP_MODEL at a .gguf "
+                    "file you copied over.")
+    if proxy_for("https://huggingface.co", net) is None:   # fail in seconds, not after the hub's retries
+        import socket
+        try:
+            socket.create_connection(("huggingface.co", 443), timeout=3).close()
+        except OSError:
+            raise NetError(f"{model} isn't downloaded yet and huggingface.co can't be reached. {offline_hint}") from None
+    apply_to_libraries(net)                           # the download honours ca_bundle / proxy too
+    print(f"boop: downloading the model once ({model}/{filename}); after this boop works offline…", file=sys.stderr)
+    try:
+        return hf_hub_download(repo_id=model, filename=filename)
+    except Exception as e:
+        raise NetError(f"couldn't download {model}/{filename}: {e}. {offline_hint}") from e
 
 
 class OpenAICompatible(Backend):
@@ -191,16 +216,9 @@ def needs_download() -> bool:
     """True when the local llama.cpp model would download first (it prints progress)."""
     try:
         p = _active()
-    except cfg.ConfigError:
+        return p.type == "llamacpp" and model_file(p.model, p.file) is None
+    except (cfg.ConfigError, NetError, ImportError):
         return False
-    model = p.model or os.environ.get("BOOP_MODEL") or DEFAULT_MODEL
-    if p.type != "llamacpp" or model.endswith(".gguf"):
-        return False
-    try:
-        from huggingface_hub import try_to_load_from_cache
-    except ImportError:
-        return False
-    return not isinstance(try_to_load_from_cache(model, p.file or os.environ.get("BOOP_MODEL_FILE") or DEFAULT_FILE), str)
 
 
 def model_label() -> str:

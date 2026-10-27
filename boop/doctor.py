@@ -101,6 +101,22 @@ def doctor(use: str | None = None) -> int:
     if p.type == "fake":
         good("fake", "nothing to check")
         return 0
+    if p.type == "llamacpp":
+        from .model import model_file
+        try:
+            path = model_file(p.model, p.file)
+        except (NetError, ImportError) as e:
+            bad("model", str(e))
+            return 1
+        if path is None:
+            bad("model", "not downloaded yet. Run `boop --download` once while online; after that boop works offline.")
+            return 1
+        good("model", f"{path} ({os.path.getsize(path) / 1e6:.0f} MB) · on disk, works offline")
+        try:
+            import llama_cpp  # noqa: F401
+        except ImportError:
+            bad("llama.cpp", "llama-cpp-python isn't installed. Install it, or use another provider (boop --providers).")
+            return 1
     url = p.base_url or ("https://api.anthropic.com" if p.type == "anthropic" else "")
     if url:
         info("endpoint", c(url, "url"))

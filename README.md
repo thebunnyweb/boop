@@ -79,6 +79,20 @@ Without the integration boop still works, but it runs the command itself, so a `
 `pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`.
 Alternatively, skip it and point boop at Ollama (below).
 
+## Offline
+
+With the default local model boop needs no network at all once the model is on disk: the model, the folder
+index, your history and the safety checks all run on your machine.
+
+```bash
+boop --download        # fetch the model while online (once); after that it works on a plane
+boop --doctor          # ✓ model … on disk, works offline
+```
+
+For a machine that is never online, copy the `.gguf` file over and point boop at it:
+`BOOP_MODEL=/path/to/boop-360m.Q4_K_M.gguf` (or `model = "…"` under `[providers.local]`). Ollama, LM Studio and
+llama-server work offline too (`boop --use ollama`); cloud providers of course need the internet.
+
 ## Use a different model (any provider)
 
 boop's own small model runs locally by default. To use something else, run `boop --init-config` and edit

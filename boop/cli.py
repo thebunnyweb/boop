@@ -241,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--providers", action="store_true", help="list providers and which one is in use")
     ap.add_argument("--doctor", action="store_true", help="test the provider: key, TLS, proxy, a real request")
     ap.add_argument("--init-config", action="store_true", help="write a commented starter config file")
+    ap.add_argument("--download", action="store_true", help="download the local model now, for offline use later")
     ap.add_argument("--version", action="version", version=f"boop {__version__}")
     ap.add_argument("--out", help=argparse.SUPPRESS)
     ap.add_argument("--repl", action="store_true", help=argparse.SUPPRESS)
@@ -259,6 +260,15 @@ def main(argv: list[str] | None = None) -> int:
     if a.providers or a.doctor:
         from . import doctor
         return doctor.providers(a.use) if a.providers else doctor.doctor(a.use)
+    if a.download:
+        from . import config as cfg
+        from .model import model_file
+        p = cfg.active(a.use)
+        if p.type != "llamacpp":
+            print(f"boop: provider {p.name} is {p.type}: nothing to download (it needs its server or the internet)")
+            return 0
+        print(f"boop: model ready, works offline: {model_file(p.model, p.file, p.network, download=True)}")
+        return 0
     if a.init_config:
         from .config import write_starter
         path, made = write_starter()

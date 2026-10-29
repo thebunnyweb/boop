@@ -15,8 +15,16 @@ from . import config as cfg
 from .net import NetError, apply_to_libraries, explain, post_json, proxy_for, ssl_context
 from .prompt import OUTPUT_SCHEMA
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
-DEFAULT_FILE = "qwen2.5-coder-1.5b-instruct-q8_0.gguf"
+NEEDS_LOCAL = ("the local model needs boop's [local] extra: pipx install \"boop-cli[local]\" "
+               "(or pipx inject boop-cli llama-cpp-python huggingface_hub). No compiler handy? Use Ollama or any "
+               "provider instead: boop --init-config, then boop --providers.")
+
+# boop's own fine-tune (training/): try it with `boop --use boop`. It becomes the default when it clears the eval
+# bar (≥ 70% on eval/tasks.jsonl, vs 79% for Qwen 1.5B at 7× the size): set USE_OWN_MODEL = True.
+OWN_MODEL, OWN_FILE = "bunnyweb/boop-360m-gguf", "boop-360m.Q4_K_M.gguf"      # ~270 MB
+USE_OWN_MODEL = False
+DEFAULT_MODEL, DEFAULT_FILE = (OWN_MODEL, OWN_FILE) if USE_OWN_MODEL else (
+    "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF", "qwen2.5-coder-1.5b-instruct-q8_0.gguf")   # ~1.9 GB
 MAX_TOKENS = 256
 REMOTE_MAX_TOKENS = 1024       # hosted reasoning models spend tokens before answering
 
@@ -49,7 +57,10 @@ def _quiet_stderr():
 
 class LlamaCpp(Backend):
     def __init__(self, model: str | None = None, filename: str | None = None, network: cfg.Network | None = None):
-        from llama_cpp import Llama
+        try:
+            from llama_cpp import Llama
+        except ImportError:
+            raise NetError(NEEDS_LOCAL) from None
 
         path = model_file(model, filename, network, download=True)
         kw = dict(n_ctx=4096, n_gpu_layers=-1, verbose=False)   # -1: use the GPU (Metal/CUDA) when built with it
@@ -75,7 +86,10 @@ def model_file(model: str | None = None, filename: str | None = None, network: c
         if not os.path.isfile(path):
             raise NetError(f"model file {path} does not exist (BOOP_MODEL / model in the config)")
         return path
-    from huggingface_hub import try_to_load_from_cache
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        raise NetError(NEEDS_LOCAL) from None
     cached = try_to_load_from_cache(model, filename)
     if isinstance(cached, str):
         return cached
@@ -112,7 +126,8 @@ class OpenAICompatible(Backend):
             self.headers = {"api-key": p.api_key or "", **p.headers}
         else:
             self.url = f"{(p.base_url or '').rstrip('/')}/chat/completions"
-            self.headers = {**({"Authorization": f"Bearer {p.api_key}"} if p.api_key else {}), **p.headers}
+            auth = {p.api_key_header: f"{p.api_key_prefix}{p.api_key}"} if p.api_key else {}
+            self.headers = {**auth, **p.headers}
 
     def generate(self, messages: list[dict]) -> str:
         body = {"messages": messages, "temperature": 0, "max_tokens": REMOTE_MAX_TOKENS,
@@ -256,5 +271,8 @@ def make_backend(use: str | None = None) -> Backend:
         except NetError as e:
             raise SystemExit(f"boop: {e}")
     if p.type == "llamacpp":
-        return LlamaCpp(p.model, p.file, p.network)
+        try:
+            return LlamaCpp(p.model, p.file, p.network)
+        except NetError as e:
+            raise SystemExit(f"boop: {e}")
     raise SystemExit(f"boop: provider {p.name}: unknown type '{p.type}' (llamacpp, openai, anthropic, azure)")

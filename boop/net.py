@@ -63,6 +63,18 @@ def _truststore():
 
 
 def ssl_context(net: Network) -> ssl.SSLContext:
+    ctx = _trust_context(net)
+    if net.client_cert:                                  # mutual TLS: present our own certificate too
+        try:
+            ctx.load_cert_chain(net.client_cert, net.client_key or None)
+        except (OSError, ssl.SSLError) as e:
+            raise NetError(f"can't load the client certificate {net.client_cert}"
+                           f"{' / ' + net.client_key if net.client_key else ''}: {e}. It must be PEM; a key with a "
+                           "passphrase isn't supported (decrypt it: openssl pkey -in key.pem -out key-nopass.pem)") from e
+    return ctx
+
+
+def _trust_context(net: Network) -> ssl.SSLContext:
     if not net.verify:
         print("boop: warning: certificate checks are OFF (network.verify = false). Anyone on the network path "
               "can read your requests and keys.", file=sys.stderr)
@@ -129,6 +141,18 @@ def explain(exc: BaseException, url: str, net: Network) -> str:
             how = "The certificate is for a different host name: check base_url."
         return f"TLS certificate check failed for {host} ({getattr(reason, 'verify_message', text)}). {how}" \
                f" Trusting: {trust_source(net)}. Run `boop --doctor` for details."
+    words = text.lower().replace("_", " ")              # TLSV13_ALERT_CERTIFICATE_REQUIRED, "certificate required"…
+    hung_up = url.startswith("https") and (isinstance(reason, (ConnectionResetError, ssl.SSLEOFError))
+                                           or "reset by peer" in words or "eof occurred" in words)
+    if "certificate required" in words or (hung_up and not net.client_cert) or (
+            not net.client_cert and any(w in words for w in ("handshake failure", "bad certificate", "certificate unknown"))):
+        # a server that wants mutual TLS refuses in one of these ways, depending on TLS version and timing
+        return (f"{host} closed the TLS connection: if it's a company gateway it probably wants a client certificate "
+                "(mutual TLS), so set network.client_cert (and client_key). Otherwise a proxy or firewall is cutting "
+                "it off; see `boop --doctor`.")
+    if hung_up or "bad certificate" in words or "unknown ca" in words:
+        return (f"{host} rejected the client certificate {net.client_cert}: check it's the one your company issued, "
+                "not expired, and signed by a CA the gateway trusts.")
     if isinstance(reason, ssl.SSLError):
         return f"TLS handshake with {host} failed ({text}). A proxy may be interfering; see `boop --doctor`."
     if isinstance(reason, (socket.timeout, TimeoutError)) or "timed out" in text:

@@ -50,11 +50,14 @@ class Api(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def serve(handler, tls=None):
+def serve(handler, tls=None, client_ca=None):
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     if tls:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(*tls)
+        if client_ca:                                    # mutual TLS: no client certificate, no connection
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            ctx.load_verify_locations(cafile=str(client_ca))
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, f"{'https' if tls else 'http'}://127.0.0.1:{srv.server_address[1]}"
@@ -83,6 +86,11 @@ def certs(tmp_path_factory):
     (d / "ext.cnf").write_text("subjectAltName=IP:127.0.0.1,DNS:localhost\n")
     run("x509", "-req", "-in", "srv.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial", "-out", "srv.pem",
         "-days", "2", "-extfile", "ext.cnf")
+    # a client certificate, as a company issues for mutual TLS
+    run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "me.key", "-out", "me.csr", "-subj", "/CN=sam")
+    (d / "client.cnf").write_text("extendedKeyUsage=clientAuth\n")
+    run("x509", "-req", "-in", "me.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial", "-out", "me.pem",
+        "-days", "2", "-extfile", "client.cnf")
     return d
 
 
@@ -316,3 +324,52 @@ def test_cli_providers_and_doctor(tmp_path):
         assert r.returncode == 0 and re.search(r"✓ answer\s+wc -l < notes.txt", r.stdout), r.stdout + r.stderr
     finally:
         srv.shutdown()
+
+
+def test_mutual_tls_gateway(certs):
+    srv, url = serve(Api, tls=(certs / "srv.pem", certs / "srv.key"), client_ca=certs / "ca.pem")
+    try:
+        p = cfg.Provider(name="gw", type="openai", base_url=url + "/v1", model="m",
+                         network=cfg.Network(ca_bundle=str(certs / "ca.pem")))
+        with pytest.raises(NetError, match="client certificate"):
+            OpenAICompatible(p).generate(MSGS)
+        p.network.client_cert, p.network.client_key = str(certs / "me.pem"), str(certs / "me.key")
+        assert json.loads(OpenAICompatible(p).generate(MSGS)) == ANSWER
+    finally:
+        srv.shutdown()
+
+
+def test_mutual_tls_from_the_config_file(certs):
+    write_config(f'[providers.gw]\npreset = "openai"\nbase_url = "https://x/v1"\nmodel = "m"\napi_key = "k"\n'
+                 f'network = {{ client_cert = "{certs / "me.pem"}", client_key = "{certs / "me.key"}" }}\n'
+                 f'[network]\nca_bundle = "{certs / "ca.pem"}"\n')
+    p = cfg.provider("gw")
+    assert p.network.client_cert.endswith("me.pem") and p.network.ca_bundle.endswith("ca.pem")   # merged, not replaced
+    write_config('[providers.gw]\npreset = "openai"\nmodel = "m"\napi_key = "k"\n'
+                 'network = { client_cert = "/nope.pem" }\n')
+    assert "network.client_cert: /nope.pem does not exist" in cfg.check(cfg.provider("gw"))
+
+
+def test_gateway_key_header():
+    srv, url = serve(Api)
+    try:
+        write_config(f'[providers.gw]\npreset = "openai"\nbase_url = "{url}/v1"\nmodel = "m"\napi_key = "s3cret"\n'
+                     'api_key_header = "x-api-key"\nheaders = {{ "X-Team" = "platform" }}\n'.replace("{{", "{").replace("}}", "}"))
+        OpenAICompatible(cfg.provider("gw")).generate(MSGS)
+        h = Api.seen[-1]["headers"]
+        assert h["x-api-key"] == "s3cret" and "authorization" not in h and h["x-team"] == "platform"
+    finally:
+        srv.shutdown()
+
+
+def test_every_way_a_gateway_refuses_a_missing_client_cert_is_explained():
+    """TLS 1.2 alerts, TLS 1.3 alerts, mid-handshake EOF and resets all mean the same thing to the user."""
+    from boop.net import explain
+    no_cert, with_cert, url = cfg.Network(), cfg.Network(client_cert="/me.pem"), "https://gw.corp/v1"
+    for reason in (ssl.SSLError(1, "[SSL: TLSV13_ALERT_CERTIFICATE_REQUIRED] tlsv13 alert certificate required"),
+                   ssl.SSLError(1, "[SSL: SSLV3_ALERT_HANDSHAKE_FAILURE] sslv3 alert handshake failure"),
+                   ssl.SSLEOFError(8, "EOF occurred in violation of protocol (_ssl.c:2417)"),
+                   ConnectionResetError(104, "Connection reset by peer")):
+        assert "network.client_cert" in explain(reason, url, no_cert), reason
+    assert "rejected the client certificate /me.pem" in explain(ConnectionResetError(104, "reset"), url, with_cert)
+    assert "WRONG_VERSION_NUMBER" in explain(ssl.SSLError(1, "WRONG_VERSION_NUMBER"), url, no_cert)

@@ -46,8 +46,8 @@ def _load_backend():
             from .model import make_backend
             _backend = make_backend()
         except ImportError as e:
-            raise SystemExit(f"boop: {e.name or 'llama-cpp-python'} is not installed. "
-                             "Try: pipx install boop-cli   (or set BOOP_API_BASE to use Ollama/LM Studio)")
+            from .model import NEEDS_LOCAL
+            raise SystemExit(f"boop: {e.name} is missing. " + NEEDS_LOCAL)
     return _backend
 
 

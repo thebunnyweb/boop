@@ -115,7 +115,8 @@ def doctor(use: str | None = None) -> int:
         try:
             import llama_cpp  # noqa: F401
         except ImportError:
-            bad("llama.cpp", "llama-cpp-python isn't installed. Install it, or use another provider (boop --providers).")
+            from .model import NEEDS_LOCAL
+            bad("llama.cpp", "llama-cpp-python isn't installed. " + NEEDS_LOCAL)
             return 1
     url = p.base_url or ("https://api.anthropic.com" if p.type == "anthropic" else "")
     if url:
@@ -124,6 +125,8 @@ def doctor(use: str | None = None) -> int:
     net = p.network
     if url.startswith("https"):
         info("trust", trust_source(net))
+        if net.client_cert:
+            info("client", f"{net.client_cert}" + (f" + {net.client_key}" if net.client_key else "") + c("  (mutual TLS)", "dim"))
     proxy = proxy_for(url, net) if url else None
     info("proxy", proxy or "none (direct connection)")
     for problem in cfg.check(p):

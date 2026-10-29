@@ -1,0 +1,5 @@
+prune tests
+prune data
+prune training
+prune eval
+prune docs

@@ -36,6 +36,7 @@ from pathlib import Path
 # type: llamacpp (local GGUF) | openai (any OpenAI-compatible /chat/completions) | anthropic | azure | fake
 PRESETS: dict[str, dict] = {
     "local": {"type": "llamacpp"},
+    "boop": {"type": "llamacpp", "model": "bunnyweb/boop-360m-gguf", "file": "boop-360m.Q4_K_M.gguf"},
     "ollama": {"type": "openai", "base_url": "http://localhost:11434/v1", "model": "qwen2.5-coder:7b"},
     "lmstudio": {"type": "openai", "base_url": "http://localhost:1234/v1"},
     "llama-server": {"type": "openai", "base_url": "http://localhost:8080/v1", "model": "local"},
@@ -63,6 +64,8 @@ class Network:
     proxy: str | None = None
     no_proxy: str = ""
     timeout: float = 60.0
+    client_cert: str | None = None      # mutual TLS: your certificate (PEM; may include the key)
+    client_key: str | None = None       # its private key, if it's a separate file
 
 
 @dataclass
@@ -73,6 +76,8 @@ class Provider:
     base_url: str | None = None
     api_key: str | None = None
     api_key_source: str = ""            # for --providers / --doctor: where the key comes from, never the key
+    api_key_header: str = "Authorization"   # gateways: "x-api-key", "Ocp-Apim-Subscription-Key", …
+    api_key_prefix: str = "Bearer "         # "" when the header carries the bare key
     headers: dict = field(default_factory=dict)
     effort: str | None = None           # anthropic: output_config.effort
     deployment: str | None = None       # azure
@@ -115,10 +120,11 @@ def _network(raw: dict | None, base: Network | None = None) -> Network:
     for k, v in (raw or {}).items():
         if not hasattr(n, k):
             raise ConfigError(f"unknown network setting '{k}' (use ca_bundle, system_certs, verify, proxy, no_proxy, "
-                              "timeout)")
+                              "timeout, client_cert, client_key)")
         setattr(n, k, v)
-    if isinstance(n.ca_bundle, str):
-        n.ca_bundle = os.path.expanduser(n.ca_bundle)
+    for k in ("ca_bundle", "client_cert", "client_key"):
+        if isinstance(getattr(n, k), str):
+            setattr(n, k, os.path.expanduser(getattr(n, k)))
     if os.environ.get("BOOP_CA_BUNDLE"):
         n.ca_bundle = os.path.expanduser(os.environ["BOOP_CA_BUNDLE"])
     return n
@@ -158,8 +164,11 @@ def provider(name: str, raw: dict | None = None) -> Provider:
         spec["type"] = "openai" if spec.get("base_url") else "llamacpp"
     net = _network(spec.pop("network", None), _network(raw.get("network")))
     key, source = _key(name, spec)
+    header = spec.get("api_key_header", "Authorization")
+    prefix = spec.get("api_key_prefix", "Bearer " if header.lower() == "authorization" else "")
     p = Provider(name=name, type=spec["type"], model=spec.get("model"), base_url=spec.get("base_url"),
-                 api_key=key, api_key_source=source, headers=dict(spec.get("headers") or {}),
+                 api_key=key, api_key_source=source, api_key_header=header, api_key_prefix=prefix,
+                 headers=dict(spec.get("headers") or {}),
                  effort=spec.get("effort"), deployment=spec.get("deployment"), api_version=spec.get("api_version"),
                  file=spec.get("file"), network=net)
     return p
@@ -196,8 +205,12 @@ def check(p: Provider) -> list[str]:
     if p.type in ("openai", "anthropic", "azure") and not p.api_key and _is_remote(p):
         hint = p.api_key_source or "api_key_env / api_key_cmd"
         out.append(f"providers.{p.name}: no API key ({hint} is empty)")
-    if p.network.ca_bundle and not os.path.exists(p.network.ca_bundle):
-        out.append(f"network.ca_bundle: {p.network.ca_bundle} does not exist")
+    for k in ("ca_bundle", "client_cert", "client_key"):
+        path = getattr(p.network, k)
+        if path and not os.path.exists(path):
+            out.append(f"network.{k}: {path} does not exist")
+    if p.network.client_key and not p.network.client_cert:
+        out.append("network.client_key is set but client_cert isn't")
     return out
 
 
@@ -233,6 +246,15 @@ use = "local"                 # boop's own small model, runs on your machine
 # preset = "azure"
 # base_url = "https://<resource>.openai.azure.com"
 # deployment = "<deployment name>"
+
+# [providers.gateway]                   # a company LLM gateway (Azure APIM, Kong, Apigee, LiteLLM…)
+# preset = "openai"
+# base_url = "https://llm.corp.example/v1"
+# model = "…"
+# api_key_env = "CORP_LLM_KEY"
+# api_key_header = "x-api-key"          # if it doesn't use Authorization: Bearer …
+# headers = { "X-Team" = "platform" }   # any extra headers it wants
+# network = { client_cert = "~/certs/me.pem", client_key = "~/certs/me.key" }   # if it wants mutual TLS
 
 # [network]
 # ca_bundle = "~/certs/corp-root.pem"   # behind a proxy that inspects HTTPS: its root CA (PEM)

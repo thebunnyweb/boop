@@ -2,7 +2,7 @@
 
 Say what you want in plain English. boop shows you the command. Press Enter to run it.
 
-![boop in a terminal](docs/boop.gif)
+![boop in a terminal](https://raw.githubusercontent.com/thebunnyweb/boop/main/docs/boop.gif)
 
 ```console
 $ boop find pdfs over 10mb in downloads
@@ -59,8 +59,16 @@ skips hidden folders, caches, `node_modules`, `Library` and the like, and lives 
 ## Install
 
 ```bash
-pipx install boop-cli          # or: pip install boop-cli
+pipx install "boop-cli[local]"     # with boop's own model, runs on your machine (recommended)
+pipx install boop-cli              # without it: use Ollama, a company gateway or any cloud provider
+pipx install "boop-cli[all]"       # local model + the Anthropic SDK
 ```
+
+The base install is pure Python and installs anywhere. The `[local]` extra adds llama.cpp, which compiles
+when there's no prebuilt wheel for your platform: on macOS that needs the Xcode command line tools
+(`xcode-select --install`); on Windows, use the prebuilt CPU wheel:
+`pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`.
+No compiler at all? Install plain `boop-cli` and point it at Ollama or a provider (below).
 
 Then add the shell integration. It lets `cd`, `export` and history work, and adds the hotkey:
 
@@ -75,9 +83,6 @@ Hotkey: **Alt/Option+Enter** in zsh, bash 4+ and fish; **Ctrl+G** in PowerShell,
 
 Without the integration boop still works, but it runs the command itself, so a `cd` won't stick.
 
-**Windows:** `llama-cpp-python` needs a prebuilt wheel or a C++ compiler. The easy path is
-`pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`.
-Alternatively, skip it and point boop at Ollama (below).
 
 ## Offline
 
@@ -126,14 +131,23 @@ installed just work), honours `HTTPS_PROXY` / `NO_PROXY`, and takes extras in th
 ```toml
 [network]
 ca_bundle = "~/certs/corp-root.pem"    # added to the public CAs, not instead of them
-proxy = "http://proxy.corp:8080"
+proxy = "http://proxy.corp:8080"       # with credentials: http://user:pass@proxy.corp:8080
 no_proxy = "localhost,.corp"
+
+[providers.gateway]                    # a company LLM gateway: Azure APIM, Kong, Apigee, LiteLLM, vLLM…
+preset = "openai"
+base_url = "https://llm.corp.example/v1"
+model = "…"
+api_key_env = "CORP_LLM_KEY"
+api_key_header = "x-api-key"           # when it doesn't take Authorization: Bearer …
+headers = { "X-Team" = "platform" }    # any extra headers it wants
+network = { client_cert = "~/certs/me.pem", client_key = "~/certs/me.key" }   # when it wants mutual TLS
 ```
 
 `boop --doctor` checks the key, the proxy, the TLS handshake (and who issued the certificate) and makes one
 real request, and says what to change when something fails.
 
-![providers, a corporate CA and boop --doctor](docs/providers.gif)
+![providers, a corporate CA and boop --doctor](https://raw.githubusercontent.com/thebunnyweb/boop/main/docs/providers.gif)
 
 ## How good is it?
 

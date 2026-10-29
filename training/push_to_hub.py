@@ -21,8 +21,8 @@ OS and shell (macOS/zsh, Linux/bash, Windows/PowerShell). Small enough to downlo
 instantly on a laptop CPU.
 
 ```bash
-pipx install boop-cli
-export BOOP_MODEL={repo} BOOP_MODEL_FILE={first}
+pipx install "boop-cli[local]"
+boop --use boop find pdfs over 10mb in downloads      # or: export BOOP_MODEL={repo} BOOP_MODEL_FILE={first}
 boop find pdfs over 10mb in downloads
 ```
 
@@ -45,18 +45,26 @@ The model on its own can be wrong; don't pipe its output straight into a shell.
 """
 
 
+def hub_name(local: Path, stem: str = "boop-360m") -> str:
+    """Stable names on the Hub (boop's default points at them): SmolLM2-360M-Instruct.Q4_K_M.gguf → boop-360m.Q4_K_M.gguf"""
+    import re
+    m = re.search(r"(Q\d+_[A-Z0-9_]+|Q\d+_\d|F16|BF16)", local.name.upper())
+    return f"{stem}.{m.group(1) if m else local.stem}.gguf"
+
+
 def push(repo: str, ggufs: list[Path], base: str, token: str | None = None, private: bool = False) -> str:
     from huggingface_hub import HfApi
 
     api = HfApi(token=token)
     api.create_repo(repo, private=private, exist_ok=True)
-    for g in ggufs:
-        api.upload_file(path_or_fileobj=str(g), path_in_repo=g.name, repo_id=repo)
-    rows = "\n".join(f"| `{g.name}` | {g.stat().st_size / 1e6:.0f} MB |" for g in ggufs)
-    card = CARD.format(base=base, repo=repo, first=ggufs[0].name, files=rows)
+    names = [hub_name(g) for g in ggufs]
+    for g, name in zip(ggufs, names):
+        api.upload_file(path_or_fileobj=str(g), path_in_repo=name, repo_id=repo)
+    rows = "\n".join(f"| `{n}` | {g.stat().st_size / 1e6:.0f} MB |" for g, n in zip(ggufs, names))
+    card = CARD.format(base=base, repo=repo, first=names[-1], files=rows)
     api.upload_file(path_or_fileobj=card.encode(), path_in_repo="README.md", repo_id=repo)
     url = f"https://huggingface.co/{repo}"
-    print(f"pushed {[g.name for g in ggufs]} → {url}")
+    print(f"pushed {names} → {url}")
     return url
 
 

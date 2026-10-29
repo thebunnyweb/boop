@@ -176,3 +176,13 @@ def test_fuzzy_matching():
     a, _ = fuzzy("comp", "compress the logs folder")
     b, _ = fuzzy("comp", "copy the main page")  or (-99, [])
     assert a > b
+
+
+def test_forget_a_past_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    from boop.picker import forget_run, load_runs, record_run
+    record_run("big folders", "du -sh * | grep -E '^[0-9]+[MG]'")
+    record_run("list", "ls")
+    record_run("big folders again", "du -sh * | grep -E '^[0-9]+[MG]'")
+    forget_run("du -sh * | grep -E '^[0-9]+[MG]'")
+    assert [r["command"] for r in load_runs()] == ["ls"]

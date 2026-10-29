@@ -65,10 +65,12 @@ def roots() -> list[Path]:
 
 # ---- building ---------------------------------------------------------------------------------
 
-def walk(root: Path, max_depth: int = MAX_DEPTH, limit: int = MAX_FOLDERS) -> list[str]:
-    """Every folder under root (breadth first, so shallow folders survive the limit)."""
+def walk(root: Path, max_depth: int = MAX_DEPTH, limit: int = MAX_FOLDERS,
+         denied: list | None = None) -> list[str]:
+    """Every folder under root (breadth first, so shallow folders survive the limit). Folders the OS won't let
+    us read go into `denied` (on macOS: Desktop, Documents, Downloads until the terminal is allowed in)."""
     out, level = [], [str(root)]
-    for _ in range(max_depth):
+    for depth in range(max_depth):
         nxt = []
         for d in level:
             try:
@@ -86,6 +88,10 @@ def walk(root: Path, max_depth: int = MAX_DEPTH, limit: int = MAX_FOLDERS) -> li
                         nxt.append(e.path)
                         if len(out) >= limit:
                             return out
+            except PermissionError:
+                if denied is not None and depth <= 1:
+                    denied.append(d)
+                continue
             except OSError:
                 continue
         level = nxt
@@ -94,8 +100,12 @@ def walk(root: Path, max_depth: int = MAX_DEPTH, limit: int = MAX_FOLDERS) -> li
     return out
 
 
+DENIED: list[str] = []          # from the last build(): folders the OS refused to list
+
+
 def build() -> int:
-    folders = [p for r in roots() for p in walk(r)]
+    DENIED.clear()
+    folders = [p for r in roots() for p in walk(r, denied=DENIED)]
     index_file().parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=index_file().parent, prefix=".folders.")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -210,6 +220,19 @@ def lookup(request: str, *, local: list[str] | None = None, index: dict | None =
     return out
 
 
+def denied_hint() -> str:
+    """What to do when the OS hid folders from the index (empty when nothing was hidden)."""
+    if not DENIED:
+        return ""
+    names = ", ".join(display(d) for d in DENIED[:6])
+    if sys.platform == "darwin":
+        how = ("macOS privacy settings blocked them: System Settings → Privacy & Security → Files and Folders "
+               "(or Full Disk Access) → allow your terminal app, then run boop --reindex")
+    else:
+        how = "no permission to read them; fix the permissions, then run boop --reindex"
+    return f"couldn't look inside {names}: {how}.\n"
+
+
 def display(path: str, home: str | None = None) -> str:
     """~/Media/Anime on macOS/Linux (short, works in every POSIX shell). With a space it's
     $HOME/Tax Stuff instead, because "~/Tax Stuff" in quotes is not expanded. Full paths on Windows."""
@@ -230,6 +253,7 @@ def main() -> None:
         t0 = time.time()
         n = build()
         print(f"indexed {n} folders in {time.time() - t0:.1f}s → {index_file()}")
+        print(denied_hint() or "", end="")
     if a.lookup:
         for phrase, paths in lookup(a.lookup):
             print(f"{phrase} → {', '.join(paths)}")

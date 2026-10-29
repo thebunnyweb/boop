@@ -65,3 +65,23 @@ def test_no_index_means_no_known_folders(monkeypatch, tmp_path):
     monkeypatch.setenv("BOOP_NO_INDEX", "1")
     index.refresh_in_background()                     # disabled: must not start anything or create files
     assert not (tmp_path / "nothing").exists()
+
+
+def test_folders_the_os_hides_are_reported(tmp_path, monkeypatch):
+    """macOS keeps Desktop/Documents/Downloads from apps without permission: say so, don't index silently."""
+    home = fake_home(tmp_path)
+    (home / "Desktop" / "projects").mkdir(parents=True)
+    monkeypatch.setenv("BOOP_INDEX_ROOTS", str(home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    real = os.scandir
+
+    def scandir(p):
+        if str(p).endswith("Desktop"):
+            raise PermissionError(1, "Operation not permitted")
+        return real(p)
+    monkeypatch.setattr(os, "scandir", scandir)
+    index.build()
+    assert any(d.endswith("Desktop") for d in index.DENIED)
+    assert "Desktop" in index.denied_hint() and "boop --reindex" in index.denied_hint()
+    monkeypatch.setattr(index.sys, "platform", "darwin")
+    assert "Privacy & Security" in index.denied_hint()

@@ -86,6 +86,9 @@ def norm_lines(text: str, sandbox: Path) -> list[str]:
 
 def check(task: dict, stdout: str, sandbox: Path, shell: str, home: Path | None = None) -> bool:
     kind = task["check"]
+    if kind == "lastcol":                                 # "3  docs/": the names in the last column, any order
+        got = {l.split()[-1].rstrip("/") for l in norm_lines(stdout, sandbox) if l.split()}
+        return sorted(got) == sorted(task["expect"])
     if kind == "names":                                   # files elsewhere (e.g. under ~): compare basenames
         got = {os.path.basename(l.strip().rstrip("/")) for l in stdout.splitlines() if l.strip()}
         return sorted(got) == sorted(task["expect"])

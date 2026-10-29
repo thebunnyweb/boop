@@ -275,8 +275,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"boop: {'wrote' if made else 'already exists:'} {path}")
         return 0
     if a.reindex:
-        from .index import build, index_file
+        from .index import build, denied_hint, index_file
         print(f"boop: indexed {build()} folders → {index_file()}")
+        hint = denied_hint()
+        if hint:
+            print("boop: " + hint, end="", file=sys.stderr)
         return 0
     shell = detect_shell(a.shell)
 

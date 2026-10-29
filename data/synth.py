@@ -367,6 +367,11 @@ TEMPLATES = [
       "find {docs} -type f -name '*.pdf' -size +1M", {"check": "lines", "expect": ev(lambda s: [f"{s['docs']}/{s['big']}"])},
       powershell="Get-ChildItem {docs} -Recurse -Filter *.pdf | Where-Object Length -gt 1MB",
       explain="Lists PDF files in {docs} larger than 1 MB."),
+    T("dirs-over-size", ["which folders here are over 1mb", "folders in here bigger than 1 MB, with their sizes",
+                         "show the directories taking more than 1mb", "what folders use more than a megabyte"],
+      "du -sm */ | awk '$1 > 1' | sort -rn", {"check": "lastcol", "expect": ev(lambda s: [s["docs"]])},
+      powershell="Get-ChildItem -Directory | ForEach-Object {{ [pscustomobject]@{{ MB = [math]::Round((Get-ChildItem $_ -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1); Name = $_.Name }} }} | Where-Object MB -gt 1 | Sort-Object MB -Descending",
+      explain="Lists the folders here larger than 1 MB, biggest first."),
     T("find-ext-name", ["{ext} files in {src} with {stem} in the name", "find {src} {ext} files named like {stem}"],
       "find {src} -type f -name '*{stem}*.{ext}'", {"check": "lines", "expect": ev(lambda s: [f"{s['src']}/{s['todo_file']}"])},
       powershell="Get-ChildItem {src} -Recurse -Filter '*{stem}*.{ext}'",
@@ -419,6 +424,11 @@ TEMPLATES = [
     T("known-zip", ["zip my {knick} folder", "make a zip of the {knick} folder"],
       "zip -qr {kbase}.zip {kq}", {"check": "verify", "verify": "unzip -l {kbase}.zip | grep -q {kname}"}, known=1,
       powershell="Compress-Archive -Path {kq} -DestinationPath {kbase}.zip", explain="Zips your {knick} folder into {kbase}.zip."),
+    T("known-git", ["show my commits from yesterday in my {knick} folder", "git log of the {knick} folder since yesterday",
+                    "what did I commit in {knick} recently"],
+      "git -C {kq} log --since=yesterday --oneline", {"check": "contains", "expect": ev(lambda s: [s["msg"]])},
+      known=1, git=True, powershell="git -C {kq} log --since=yesterday --oneline",
+      explain="Lists recent commits in the repository in your {knick} folder."),
     T("known-two", ["copy the {kext} files from my {knick} folder to {knick2}",
                     "copy all {kext}s in {knick} over to my {knick2} folder"],
       "cp {kq}/*.{kext} {kq2}/", {"check": "verify", "verify": "test -f \"$HOME/{krel2}/{knamed1}\""}, known=2,
@@ -484,6 +494,11 @@ def make_examples(t: T, n: int, os_name: str, rng: random.Random, verify: bool):
             w = World(random.Random(rng.random()))
             w.build(root, git=t.git)
             w.build_home(home, max(0, t.known), os_name)
+            if t.id == "known-git":                         # the known folder is a repo, not the current one
+                kdir = home / w.slots["krel"]
+                g = lambda *a: subprocess.run(["git", *a], cwd=kdir, check=True, capture_output=True)
+                g("init", "-q", "-b", "main"); g("config", "user.email", "synth@boop"); g("config", "user.name", "synth")
+                g("add", "-A"); g("commit", "-q", "-m", w.slots["msg"])
             s = dict(w.slots)
             s["stem"] = s["todo_file"].rsplit(".", 1)[0]
             s["knamed1"] = s["knamed"][0] if t.known == 2 else ""      # a file that known-two copies over

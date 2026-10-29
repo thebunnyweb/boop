@@ -77,6 +77,23 @@ def record_run(request: str, command: str) -> None:
         pass
 
 
+def forget_run(command: str) -> None:
+    """Drop every past run of this command (a wrong answer shouldn't keep coming back)."""
+    try:
+        lines = history_file().read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    keep = []
+    for line in lines:
+        try:
+            if json.loads(line).get("command") == command:
+                continue
+        except ValueError:
+            pass
+        keep.append(line)
+    history_file().write_text("".join(l + "\n" for l in keep), encoding="utf-8")
+
+
 def fuzzy(query: str, text: str) -> tuple[int, list[int]] | None:
     """fzf-ish: every query character in order. Higher score for runs and word starts; None if no match."""
     q, t = query.lower().replace(" ", ""), text.lower()
@@ -230,6 +247,14 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
             st["mode"], st["edit_of"] = "edit", it
             buf.document = Document(it.command, len(it.command))
 
+    @keys.add("c-x")
+    def _(e):
+        it = selected()
+        if it and it.kind == "past" and st["mode"] == "search":
+            forget_run(it.command)
+            runs[:] = [r for r in runs if r["command"] != it.command]
+            refresh_items()
+
     @keys.add("c-y")
     def _(e):
         it = selected()
@@ -309,7 +334,8 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
             keys_ = [("⏎", "run"), ("esc", "back")]
         else:
             keys_ = [("⏎", "run" if (selected() and selected().kind != "ask") else "ask"), ("⇥", "edit"),
-                     ("^Y", "copy"), ("esc", "quit")]
+                     ("^Y", "copy")] + ([("^X", "forget")] if selected() and selected().kind == "past" else []) + \
+                [("esc", "quit")]
         frags, used = [("class:border", "╰─ ")], 3
         for k, label in keys_:
             piece = f" {k}  {label}  "

@@ -361,7 +361,7 @@ def pick(term: Terminal, *, ask, warnings_for, cwd: str, shell: str, model: str,
         n_past = sum(1 for it in st["items"] if it.kind == "past")
         head = []
         if st["answer"] is not None and st["asked_for"] == buf.text.strip():
-            head = [("class:ok", "✦ "), ("class:dim", f"boop · {st['took']:.1f}s  ")]
+            head = [("class:ok", "✦ "), ("class:text", model), ("class:dim", f" · {st['took']:.1f}s  ")]
         elif not buf.text.strip():
             head = [("class:dim", "type what you want · ↑↓ recent  " if runs else "type what you want  ")]
         tail = f"{n_past} past " if n_past else ""

@@ -37,7 +37,7 @@ show disk usage sorted   ⌥⏎                # 4. hotkey: type English at your
 
 English mode opens a fresh panel after each command until you press esc. It remembers the last few steps,
 so "now zip them" works. Keys: ↑↓ (or Ctrl-P/N) move, ⏎ asks or runs, ⇥ edits the command first, Ctrl-Y
-copies, esc goes back or quits. `BOOP_PLAIN=1` swaps the panel for plain line-by-line prompts. In a pipe, boop shows the model only the first few lines; the whole input goes to the command.
+copies, Ctrl-X forgets a past run (`boop --clear-history` forgets them all), esc goes back or quits. `BOOP_PLAIN=1` swaps the panel for plain line-by-line prompts. In a pipe, boop shows the model only the first few lines; the whole input goes to the command.
 
 Other handy flags: `boop -p …` prints just the command (for scripts, or `| sh`), `boop -y …` runs safe commands without asking, `boop -x 'tar -xzvf a.tgz'` explains a command.
 
@@ -115,11 +115,19 @@ api_key_env = "ANTHROPIC_API_KEY"
 preset = "ollama"
 model = "qwen2.5-coder:7b"
 
+[providers.gemini]              # free tier: key from aistudio.google.com → Get API key
+preset = "gemini"               # model defaults to gemini-3.5-flash-lite (37/37 on our eval)
+api_key_cmd = "security find-generic-password -s boop-gemini -w"   # or api_key_env / api_key
+
 [providers.work]
 preset = "openai"               # any OpenAI-compatible API; set base_url for a gateway, vLLM, LiteLLM…
 model = "…"
 api_key_cmd = "security find-generic-password -s boop-openai -w"    # keys from Keychain, 1Password, pass…
 ```
+
+**Gemini's free tier** works well for boop (one request per command), with two limits worth knowing:
+about 5 requests a minute per model, and Google may use free-tier prompts to improve its products. boop's prompt
+holds your request, the current folder's path and the names in it, never file contents.
 
 Presets: `local`, `ollama`, `lmstudio`, `llama-server`, `openai`, `anthropic`, `gemini`, `openrouter`, `groq`,
 `mistral`, `deepseek`, `together`, `azure`. `boop --providers` lists them, `boop --use home …` switches for one

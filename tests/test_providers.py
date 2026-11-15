@@ -408,3 +408,37 @@ def test_key_written_directly_in_the_file_is_used():
     p = cfg.active()
     assert p.api_key == "AIza-direct" and p.api_key_source == "config file" and cfg.check(p) == []
     assert p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+
+
+class Gemini(Api):
+    """Errors the way Gemini sends them: a JSON list around the error object."""
+    status = 404
+    message = "This model models/gemini-2.5-flash is no longer available to new users."
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        data = json.dumps([{"error": {"code": self.status, "message": self.message, "status": "X"}}]).encode()
+        self.send_response(self.status)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def test_gemini_style_errors_are_shown_not_crashed_on():
+    srv, url = serve(Gemini)
+    try:
+        p = cfg.Provider(name="g", type="openai", base_url=url + "/v1", model="gemini-2.5-flash", api_key="k")
+        with pytest.raises(NetError, match="HTTP 404.*no longer available to new users"):
+            OpenAICompatible(p).generate(MSGS)
+        Gemini.status, Gemini.message = 503, "This model is currently experiencing high demand."
+        with pytest.raises(NetError, match="HTTP 503: the model is overloaded"):
+            OpenAICompatible(p).generate(MSGS)
+    finally:
+        Gemini.status, Gemini.message = 404, "This model models/gemini-2.5-flash is no longer available to new users."
+        srv.shutdown()
+
+
+def test_gemini_preset_works_without_naming_a_model():
+    write_config('use = "g"\n[providers.g]\npreset = "gemini"\napi_key = "k"\n')
+    p = cfg.active()
+    assert p.model and cfg.check(p) == []

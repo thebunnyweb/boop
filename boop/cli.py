@@ -236,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--shell", help="zsh | bash | fish | powershell | cmd (default: detected)")
     ap.add_argument("--init", metavar="SHELL", help="print the shell integration for zsh/bash/fish/powershell")
     ap.add_argument("--forget", action="store_true", help="clear what boop remembers from this session")
+    ap.add_argument("--clear-history", action="store_true",
+                    help="forget every past run (what the panel suggests) and this session's memory")
     ap.add_argument("--reindex", action="store_true", help="rebuild the folder index now (it updates daily)")
     ap.add_argument("--use", metavar="PROVIDER", help="answer with this provider (from the config or a preset)")
     ap.add_argument("--providers", action="store_true", help="list providers and which one is in use")
@@ -254,6 +256,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.forget:
         forget()
+        return 0
+    if a.clear_history:
+        from .picker import history_file
+        n = 0
+        try:
+            n = sum(1 for _ in history_file().open(encoding="utf-8"))
+            history_file().unlink()
+        except OSError:
+            pass
+        forget()
+        print(f"boop: forgot {n} past run{'s' if n != 1 else ''} and this session's memory ({history_file()})")
         return 0
     if a.use:
         os.environ["BOOP_PROVIDER"] = a.use          # also reaches the background model loader and subprocesses

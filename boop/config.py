@@ -44,6 +44,9 @@ PRESETS: dict[str, dict] = {
     "anthropic": {"type": "anthropic", "model": "claude-opus-5-5", "effort": "low",
                   "api_key_env": "ANTHROPIC_API_KEY"},
     "gemini": {"type": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+               # 2026-11, new free-tier key: 37/37 on eval/, ~1 s, no daily cap hit (3.5-flash: 20 requests/day;
+               # 2.5-flash: closed to new users)
+               "model": "gemini-3.5-flash-lite",
                "api_key_env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"]},
     "openrouter": {"type": "openai", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY"},
     "groq": {"type": "openai", "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY"},

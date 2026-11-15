@@ -197,10 +197,13 @@ def _error_detail(e: urllib.error.HTTPError) -> str:
         return ""
     try:
         j = json.loads(raw)
-        err = j.get("error", j)
-        return (err.get("message") if isinstance(err, dict) else str(err)) or raw[:300]
     except ValueError:
         return raw[:300]
+    if isinstance(j, list) and j:                        # Gemini wraps its error in a list: [{"error": {...}}]
+        j = j[0]
+    err = j.get("error", j) if isinstance(j, dict) else j
+    msg = err.get("message") if isinstance(err, dict) else err
+    return str(msg or raw)[:400]
 
 
 def _http_message(code: int, url: str, detail: str) -> str:
@@ -209,6 +212,7 @@ def _http_message(code: int, url: str, detail: str) -> str:
             403: "the key isn't allowed to use this model or endpoint",
             404: "not found: check base_url and the model name",
             407: "the proxy wants credentials: proxy = \"http://user:password@host:port\"",
-            429: "rate limited or out of credit: try again shortly",
+            429: "rate limited or out of quota: wait a minute, or switch model/provider (boop --use …)",
+            503: "the model is overloaded right now: try again in a minute, or use another model",
             }.get(code, "the server returned an error")
     return f"{host} said HTTP {code}: {hint}." + (f" ({detail})" if detail else "")

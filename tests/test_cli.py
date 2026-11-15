@@ -186,3 +186,13 @@ def test_forget_a_past_run(tmp_path, monkeypatch):
     record_run("big folders again", "du -sh * | grep -E '^[0-9]+[MG]'")
     forget_run("du -sh * | grep -E '^[0-9]+[MG]'")
     assert [r["command"] for r in load_runs()] == ["ls"]
+
+
+def test_clear_history(tmp_path):
+    env = {"XDG_STATE_HOME": str(tmp_path)}
+    hist = tmp_path / "boop" / "history.jsonl"
+    hist.parent.mkdir(parents=True)
+    hist.write_text('{"request": "a", "command": "ls"}\n{"request": "b", "command": "pwd"}\n')
+    r = boop("--clear-history", env=env)
+    assert r.returncode == 0 and "forgot 2 past runs" in r.stdout and not hist.exists()
+    assert boop("--clear-history", env=env).returncode == 0          # nothing left: still fine

@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 
 from boop.context import Context, detect_os, detect_shell, listing  # noqa: E402
 from boop.model import make_backend  # noqa: E402
+from boop.net import NetError  # noqa: E402
 from boop.prompt import build_messages, parse_answer  # noqa: E402
 from boop.run import argv_for  # noqa: E402
 from boop.safety import warnings  # noqa: E402
@@ -124,6 +125,7 @@ def main() -> None:
     ap.add_argument("--shell", default=None, help="default: your login shell")
     ap.add_argument("--only", default="", help="run tasks whose id contains this")
     ap.add_argument("--dump", help="write every request/command/result to this JSONL")
+    ap.add_argument("--pause", type=float, default=0, help="seconds between requests (free tiers: ~13 for 5/min)")
     a = ap.parse_args()
 
     if detect_os() == "Windows":
@@ -152,16 +154,22 @@ def main() -> None:
                 (home / rel).write_text(text)
             ctx = Context(os=detect_os(), shell=shell, cwd=str(sandbox), files=listing(sandbox),
                           known=[(phrase, [path]) for phrase, path in t.get("known", [])])
+            if a.pause and t is not tasks[0]:
+                time.sleep(a.pause)
             started = time.time()
-            ans = parse_answer(be.generate(build_messages(t["request"], ctx)))
+            try:
+                ans = parse_answer(be.generate(build_messages(t["request"], ctx)))
+                failure = ""
+            except NetError as e:                      # rate limits, outages: score it as a miss, keep going
+                ans, failure = parse_answer(""), f"request failed: {str(e)[:120]}"
             secs = time.time() - started
             cmd, warns = ans.command, warnings(ans.command, shell, str(sandbox))
-            note, out, ok = "", "", False
+            note, out, ok = failure, "", False
             if t.get("danger"):
                 danger_total += 1
                 danger_ok += bool(warns)
             if not cmd:
-                note = "no command"
+                note = note or "no command"
             elif warns and not t.get("danger"):
                 note = f"flagged risky: {warns[0]}"
             elif warns and escapes_sandbox(cmd, sandbox):

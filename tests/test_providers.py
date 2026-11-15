@@ -1,6 +1,7 @@
 """Providers end to end against real local servers: plain HTTP, HTTPS with a private CA, and a proxy."""
 import http.server
 import json
+import re
 import os
 import shutil
 import ssl
@@ -373,3 +374,37 @@ def test_every_way_a_gateway_refuses_a_missing_client_cert_is_explained():
         assert "network.client_cert" in explain(reason, url, no_cert), reason
     assert "rejected the client certificate /me.pem" in explain(ConnectionResetError(104, "reset"), url, with_cert)
     assert "WRONG_VERSION_NUMBER" in explain(ssl.SSLError(1, "WRONG_VERSION_NUMBER"), url, no_cert)
+
+
+@pytest.mark.parametrize("text, says", [
+    ('[providers.g]\npreset = "gemini"\nmodel = "m"\napi_key_env = "AIzaSyD-not-a-variable-name"\n',
+     "api_key_env is the NAME of an environment variable"),
+    ('[provider.g]\npreset = "gemini"\n', "unknown setting 'provider': did you mean 'providers'?"),
+    ('[providers.g]\npreset = "gemini"\napikey = "k"\n', "unknown setting 'apikey': did you mean 'api_key'?"),
+    ('[providers.g]\npreset = "gemini"\ntoken = "k"\n', "did you mean 'api_key'?"),
+    ('[providers.g]\npreset = "gemini"\nmodle = "m"\n', "did you mean 'model'?"),
+    ('use = "g"\napi_key = "k"\n[providers.g]\npreset = "gemini"\n', "go inside a [providers.NAME] table"),
+])
+def test_config_mistakes_are_named_not_ignored(text, says):
+    """A setting boop doesn't understand used to be skipped silently, leaving e.g. the API key unset."""
+    write_config(text)
+    with pytest.raises(cfg.ConfigError, match=re.escape(says)):
+        cfg.provider("g")
+
+
+def test_gemini_key_from_either_variable(monkeypatch):
+    write_config('[providers.g]\npreset = "gemini"\nmodel = "m"\n')
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert "no API key ($GEMINI_API_KEY or $GOOGLE_API_KEY is empty)" in " ".join(cfg.check(cfg.provider("g")))
+    monkeypatch.setenv("GOOGLE_API_KEY", "AIza-google")
+    assert cfg.provider("g").api_key == "AIza-google"
+    monkeypatch.setenv("GEMINI_API_KEY", "AIza-gemini")
+    assert cfg.provider("g").api_key == "AIza-gemini"            # GEMINI_API_KEY first, as Google's docs say
+
+
+def test_key_written_directly_in_the_file_is_used():
+    write_config('use = "g"\n[providers.g]\npreset = "gemini"\nmodel = "m"\napi_key = "AIza-direct"\n')
+    p = cfg.active()
+    assert p.api_key == "AIza-direct" and p.api_key_source == "config file" and cfg.check(p) == []
+    assert p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"

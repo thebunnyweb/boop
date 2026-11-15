@@ -44,7 +44,7 @@ PRESETS: dict[str, dict] = {
     "anthropic": {"type": "anthropic", "model": "claude-opus-5-5", "effort": "low",
                   "api_key_env": "ANTHROPIC_API_KEY"},
     "gemini": {"type": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "api_key_env": "GEMINI_API_KEY"},
+               "api_key_env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"]},
     "openrouter": {"type": "openai", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY"},
     "groq": {"type": "openai", "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY"},
     "mistral": {"type": "openai", "base_url": "https://api.mistral.ai/v1", "api_key_env": "MISTRAL_API_KEY"},
@@ -88,6 +88,43 @@ class Provider:
 
 class ConfigError(Exception):
     pass
+
+
+PROVIDER_KEYS = {"preset", "type", "model", "base_url", "api_key", "api_key_env", "api_key_cmd", "api_key_header",
+                 "api_key_prefix", "headers", "effort", "deployment", "api_version", "file", "network"}
+TOP_KEYS = {"use", "providers", "network"}
+_KEY_TYPOS = {"apikey", "api-key", "key", "token", "api_token", "secret", "password", "openai_api_key"}
+
+
+def _did_you_mean(word: str, options) -> str:
+    import difflib
+    if word.lower().replace("-", "_") in _KEY_TYPOS:
+        return "api_key"
+    close = difflib.get_close_matches(word, sorted(options), n=1, cutoff=0.6)
+    return close[0] if close else ""
+
+
+def validate(raw: dict) -> None:
+    """Say which setting isn't understood instead of silently ignoring it (and leaving, say, the key unset)."""
+    for k in raw:
+        if k not in TOP_KEYS:
+            hint = _did_you_mean(k, TOP_KEYS | PROVIDER_KEYS)
+            where = " (provider settings go inside a [providers.NAME] table)" if k in PROVIDER_KEYS or hint == "api_key" \
+                else (f": did you mean '{hint}'?" if hint else "")
+            raise ConfigError(f"{config_path()}: unknown setting '{k}'{where}")
+    for name, spec in (raw.get("providers") or {}).items():
+        if not isinstance(spec, dict):
+            raise ConfigError(f"providers.{name} must be a table: [providers.{name}]")
+        for k in spec:
+            if k not in PROVIDER_KEYS:
+                hint = _did_you_mean(k, PROVIDER_KEYS)
+                raise ConfigError(f"providers.{name}: unknown setting '{k}'" + (f": did you mean '{hint}'?" if hint else
+                                  f" (known: {', '.join(sorted(PROVIDER_KEYS))})"))
+        envs = spec.get("api_key_env")
+        for env in ([envs] if isinstance(envs, str) else envs or []):
+            if not _looks_like_env_name(env):
+                raise ConfigError(f"providers.{name}.api_key_env is the NAME of an environment variable, like "
+                                  "\"GEMINI_API_KEY\". To put the key itself in this file, write api_key = \"…\" instead.")
 
 
 def config_path() -> Path:
@@ -143,15 +180,24 @@ def _key(name: str, spec: dict) -> tuple[str | None, str]:
         return r.stdout.strip(), f"command `{cmd.split()[0]} …`"
     if spec.get("api_key"):
         return str(spec["api_key"]), "config file"
-    env = spec.get("api_key_env")
-    if env:
-        return os.environ.get(env) or None, f"${env}"
-    return None, ""
+    envs = spec.get("api_key_env")
+    envs = [envs] if isinstance(envs, str) else list(envs or [])
+    for env in envs:                                   # the first one that's set wins
+        if os.environ.get(env):
+            return os.environ[env], f"${env}"
+    return None, " or ".join(f"${e}" for e in envs)
+
+
+def _looks_like_env_name(s: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", s or "")) and not re.match(r"(AIza|sk-|xai-|gsk_)", s) and \
+        len(s) < 64
 
 
 def provider(name: str, raw: dict | None = None) -> Provider:
     """A provider from the config file, a preset name, or both (a configured provider can start from a preset)."""
     raw = load_file() if raw is None else raw
+    validate(raw)
     configured = (raw.get("providers") or {}).get(name)
     if configured is None and name not in PRESETS:
         known = sorted(set(PRESETS) | set(raw.get("providers") or {}))
